@@ -20,4 +20,4 @@ Options:
 Just run it.  
 
 ## Install
-Download executable from here, extract and run it.  
+Download executable from [here](https://github.com/leonkasovan/go-sffcli/releases/download/1.0/sffcli.zip), extract and run it.  

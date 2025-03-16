@@ -1,2 +1,6 @@
-/kfmZ.sff
-/sffcli.exe
+*.sff
+*.exe
+*.zip
+*.act
+*.png
+*.tsv

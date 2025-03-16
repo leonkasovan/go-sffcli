@@ -44,3 +44,9 @@ Just run it.
 
 ## Install
 Download executable from [here](https://github.com/leonkasovan/go-sffcli/releases/download/1.0/sffcli.zip), extract and run it.  
+
+## Todo:
+- create 1 big png image atlas from all sprite
+- convert to DDS (DirectDraw Surface) format
+- output to specific directory
+- customize filename format

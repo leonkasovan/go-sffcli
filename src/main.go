@@ -21,66 +21,10 @@ import (
 	"github.com/leonkasovan/sffcli/packages/physfs"
 )
 
-type TransType int32
-
-const MaxPalNo = 12
-const (
-	TT_default TransType = iota
-	TT_none
-	TT_add
-	TT_alpha
-	TT_add1
-	TT_sub
-)
+const MaxPalNo = 32
 
 type Texture interface {
-	SetData(data []byte)
-	SetDataG(data []byte, mag, min, ws, wt int32)
-	SetPixelData(data []float32)
-	SetRGBPixelData(data []float32)
-	IsValid() bool
-	GetWidth() int32
-}
-
-type PalFXDef struct {
-	time        int32
-	color       float32
-	add         [3]int32
-	mul         [3]int32
-	sinadd      [3]int32
-	sinmul      [3]int32
-	sincolor    int32
-	sinhue      int32
-	cycletime   [4]int32
-	invertall   bool
-	invertblend int32
-	hue         float32
-	interpolate bool
-	iadd        [6]int32
-	imul        [6]int32
-	icolor      [2]float32
-	ihue        [2]float32
-	itime       int32
-}
-type PalFX struct {
-	PalFXDef
-	remap        []int
-	negType      bool
-	sintime      [4]int32
-	enable       bool
-	eNegType     bool
-	eInvertall   bool
-	eInvertblend int32
-	eAdd         [3]int32
-	eMul         [3]int32
-	eColor       float32
-	eHue         float32
-	eInterpolate bool
-	eiAdd        [3]int32
-	eiMul        [3]int32
-	eiColor      float32
-	eiHue        float32
-	eiTime       int32
+	Dummy() bool
 }
 
 func Min(arg ...int32) (min int32) {
@@ -103,13 +47,6 @@ func Max(arg ...int32) (max int32) {
 func Clamp(x, a, b int32) int32 {
 	return Max(a, Min(x, b))
 }
-func (pf *PalFX) clear2(nt bool) {
-	pf.PalFXDef = PalFXDef{color: 1, icolor: [...]float32{1, 1}, mul: [...]int32{256, 256, 256}, imul: [...]int32{256, 256, 256, 256, 256, 256}}
-	pf.negType = nt
-	for i := 0; i < len(pf.sintime); i++ {
-		pf.sintime[i] = 0
-	}
-}
 
 type PaletteList struct {
 	palettes   [][]uint32
@@ -126,6 +63,7 @@ func (pl *PaletteList) init() {
 	pl.numcols = make(map[[2]int16]int)
 	pl.PalTex = nil
 }
+
 func (pl *PaletteList) SetSource(i int, p []uint32) {
 	if i < len(pl.paletteMap) {
 		pl.paletteMap[i] = i
@@ -1205,7 +1143,7 @@ func main() {
 					fmt.Println(err)
 				} else {
 					readAllDirectories = false
-					fmt.Printf("Extract %v (%d.%d.%d.%d) into %v PNG files", sff.filename, sff.header.Ver0, sff.header.Ver1, sff.header.Ver2, sff.header.Ver3, len(sff.sprites))
+					fmt.Printf("Extract %v (v%d.%d.%d) into %v PNG files", sff.filename, sff.header.Ver0, sff.header.Ver1, sff.header.Ver2, len(sff.sprites))
 					if cmdSavePalette {
 						fmt.Printf(" and %v ACT files", len(sff.palList.PalTable))
 					}
@@ -1230,7 +1168,7 @@ func main() {
 				if err != nil {
 					fmt.Println(err)
 				} else {
-					fmt.Printf("Extract %v (%d.%d.%d.%d) into %v PNG files", sff.filename, sff.header.Ver0, sff.header.Ver1, sff.header.Ver2, sff.header.Ver3, len(sff.sprites))
+					fmt.Printf("Extract %v (v%d.%d.%d) into %v PNG files", sff.filename, sff.header.Ver0, sff.header.Ver1, sff.header.Ver2, len(sff.sprites))
 					if cmdSavePalette {
 						fmt.Printf(" and %v ACT files", len(sff.palList.PalTable))
 					}

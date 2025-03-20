@@ -1,10 +1,25 @@
-// SFF CLI tool to extract sprites (into PNG format) and palettes (into ACT format) from SFF files
-// Usage: sffcli.exe <sff_file>
-// Example: sffcli.exe chars.sff
-// Build: go build -trimpath -ldflags="-s -w" -o sffcli.exe .\src\
+/* 
+ SFF CLI tool to extract sprites (into PNG format) and palettes (into ACT format) from SFF files
+ Usage: sffcli.exe <sff_file>
+ Example: sffcli.exe chars.sff
+ Build windows: go build -trimpath -ldflags="-s -w" -o sffcli.exe .\src\
+ Build linux: go build -trimpath -ldflags="-s -w" -o sffcli src/main.go
+*/
 
 package main
 
+/*
+// Windows Build Tags
+#cgo windows CFLAGS: -D_WIN32
+#cgo windows LDFLAGS: -lgdi32
+
+// Linux Build Tags
+#cgo linux CFLAGS: -D__linux -D__linux__
+#cgo linux LDFLAGS: -lm
+
+#include "pack.c"
+*/
+import "C"
 import (
 	"bytes"
 	"encoding/binary"
@@ -17,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"github.com/leonkasovan/sffcli/packages/physfs"
 )
@@ -387,6 +403,7 @@ func (s *Sprite) read(f *physfs.File, sff *Sff, offset int64, datasize uint32,
 			}
 			pal[i] = uint32(alpha)<<24 | uint32(rgb[2])<<16 | uint32(rgb[1])<<8 | uint32(rgb[0])
 		}
+		savePalette(pal, fmt.Sprintf("%v %v %v.act", "char_pal", s.Group, s.Number))
 	}
 
 	// Create a new Paletted image
@@ -925,26 +942,30 @@ func (s *Sprite) readV2(f *physfs.File, offset int64, datasize uint32, sff *Sff)
 		}
 
 		switch format {
-		case 2:
-			px = s.Rle8Decode(srcPx)
-		case 3:
-			px = s.Rle5Decode(srcPx)
-		case 4:
-			px = s.Lz5Decode(srcPx)
-		case 10, 11, 12:
-			// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
-			if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("Unknown format")
-		}
-
-		if format == 2 || format == 3 || format == 4 {
-			if err := saveImageToPNG(sff, s, px); err != nil {
-				return err
-			}
-		}
+			case 2, 3, 4:
+				switch format {
+				case 2:
+					px = s.Rle8Decode(srcPx)
+				case 3:
+					px = s.Rle5Decode(srcPx)
+				case 4:
+					px = s.Lz5Decode(srcPx)
+				}
+				if err := saveImageToPNG(sff, s, px); err != nil {
+					return err
+				}
+				img_tag := C.CString(fmt.Sprintf("%v,%v", s.Group, s.Number))
+				C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
+				defer C.free(unsafe.Pointer(img_tag))
+			case 10, 11, 12:
+				// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
+				if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
+					return err
+				}
+				C.calculate_image3((*C.FILE)(unsafe.Pointer(f)), C.int(s.Size[0]), C.int(s.Size[1]))
+			default:
+				return fmt.Errorf("Unknown format")
+		}	
 	}
 	return nil
 }
@@ -1100,8 +1121,9 @@ func extractSff(filename string, cmdSavePalette bool) (*Sff, error) {
 		} else {
 			shofs += 28
 		}
-		// fmt.Printf("Loading sprite %v/%v: %v,%v %v compressed_size=%v\n", i+1, len(spriteList), spriteList[i].Group, spriteList[i].Number, spriteList[i].Size, size)
+		//~ fmt.Printf("Loading sprite %v/%v: %v,%v %v compressed_size=%v\n", i+1, len(spriteList), spriteList[i].Group, spriteList[i].Number, spriteList[i].Size, size)
 	}
+	C.print_info()
 	return s, nil
 }
 func (s *Sff) GetSprite(g, n int16) *Sprite {

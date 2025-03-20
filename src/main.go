@@ -1,4 +1,4 @@
-/* 
+/*
  SFF CLI tool to extract sprites (into PNG format) and palettes (into ACT format) from SFF files
  Usage: sffcli.exe <sff_file>
  Example: sffcli.exe chars.sff
@@ -11,7 +11,7 @@ package main
 /*
 // Windows Build Tags
 #cgo windows CFLAGS: -D_WIN32
-#cgo windows LDFLAGS: -lgdi32
+#cgo windows LDFLAGS: -lgdi32 -lz
 
 // Linux Build Tags
 #cgo linux CFLAGS: -D__linux -D__linux__
@@ -952,31 +952,31 @@ func (s *Sprite) readV2(f *physfs.File, offset int64, datasize uint32, sff *Sff)
 		}
 
 		switch format {
-			case 2, 3, 4:
-				switch format {
-				case 2:
-					px = s.Rle8Decode(srcPx)
-				case 3:
-					px = s.Rle5Decode(srcPx)
-				case 4:
-					px = s.Lz5Decode(srcPx)
-				}
-				if err := saveImageToPNG(sff, s, px); err != nil {
-					return err
-				}
-				fmt.Printf("len(px)=%v w:%v h:%v\n", len(px), s.Size[0], s.Size[1])
-				img_tag := C.CString(fmt.Sprintf("%v_%v.png", s.Group, s.Number))
-				C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
-				defer C.free(unsafe.Pointer(img_tag))
-			case 10, 11, 12:
-				// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
-				if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
-					return err
-				}
-				C.calculate_image3((*C.FILE)(unsafe.Pointer(f)), C.int(s.Size[0]), C.int(s.Size[1]))
-			default:
-				return fmt.Errorf("Unknown format")
-		}	
+		case 2, 3, 4:
+			switch format {
+			case 2:
+				px = s.Rle8Decode(srcPx)
+			case 3:
+				px = s.Rle5Decode(srcPx)
+			case 4:
+				px = s.Lz5Decode(srcPx)
+			}
+			if err := saveImageToPNG(sff, s, px); err != nil {
+				return err
+			}
+			fmt.Printf("len(px)=%v w:%v h:%v\n", len(px), s.Size[0], s.Size[1])
+			img_tag := C.CString(fmt.Sprintf("%v_%v.png", s.Group, s.Number))
+			C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
+			defer C.free(unsafe.Pointer(img_tag))
+		case 10, 11, 12:
+			// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
+			if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
+				return err
+			}
+			C.calculate_image3((*C.FILE)(unsafe.Pointer(f)), C.int(s.Size[0]), C.int(s.Size[1]))
+		default:
+			return fmt.Errorf("Unknown format")
+		}
 	}
 	return nil
 }

@@ -15,9 +15,19 @@ package main
 
 // Linux Build Tags
 #cgo linux CFLAGS: -D__linux -D__linux__
-#cgo linux LDFLAGS: -lm
+#cgo linux LDFLAGS: -lm -lz
 
 #include "pack.c"
+#include "libpng/png.c"
+#include "libpng/pngerror.c"
+#include "libpng/pngmem.c"
+#include "libpng/pngwrite.c"
+#include "libpng/pngtrans.c"
+#include "libpng/pngwutil.c"
+#include "libpng/pngset.c"
+#include "libpng/pngwio.c"
+#include "libpng/pngwtran.c"
+#include "libpng/pngget.c"
 */
 import "C"
 import (
@@ -954,7 +964,8 @@ func (s *Sprite) readV2(f *physfs.File, offset int64, datasize uint32, sff *Sff)
 				if err := saveImageToPNG(sff, s, px); err != nil {
 					return err
 				}
-				img_tag := C.CString(fmt.Sprintf("%v,%v", s.Group, s.Number))
+				fmt.Printf("len(px)=%v w:%v h:%v\n", len(px), s.Size[0], s.Size[1])
+				img_tag := C.CString(fmt.Sprintf("%v_%v.png", s.Group, s.Number))
 				C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
 				defer C.free(unsafe.Pointer(img_tag))
 			case 10, 11, 12:
@@ -1123,7 +1134,7 @@ func extractSff(filename string, cmdSavePalette bool) (*Sff, error) {
 		}
 		//~ fmt.Printf("Loading sprite %v/%v: %v,%v %v compressed_size=%v\n", i+1, len(spriteList), spriteList[i].Group, spriteList[i].Number, spriteList[i].Size, size)
 	}
-	C.print_info()
+	// C.print_info()
 	return s, nil
 }
 func (s *Sff) GetSprite(g, n int16) *Sprite {

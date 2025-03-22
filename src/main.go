@@ -1,4 +1,4 @@
-/*
+/* 
  SFF CLI tool to extract sprites (into PNG format) and palettes (into ACT format) from SFF files
  Usage: sffcli.exe <sff_file>
  Example: sffcli.exe chars.sff
@@ -42,7 +42,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unsafe"
+	// "unsafe"
 
 	"github.com/leonkasovan/sffcli/packages/physfs"
 )
@@ -656,115 +656,6 @@ func savePalette(pal []uint32, filename string) error {
 	}
 }
 
-// ReplacePalette replaces the PLTE chunk in a PNG file with a palette from an ACT file.
-func replacePalette(pngPath string, actPath string, outputPath string) error {
-	// Open ACT palette file (768 bytes)
-	actFile, err := os.Open(actPath)
-	if err != nil {
-		return fmt.Errorf("error opening ACT file: %w", err)
-	}
-	defer actFile.Close()
-
-	// Read ACT file (768 bytes, 256 colors × 3 bytes each)
-	actPalette := make([]byte, 768)
-	_, err = actFile.Read(actPalette)
-	if err != nil {
-		return fmt.Errorf("error reading ACT file: %w", err)
-	}
-
-	// Open PNG file
-	pngFile, err := os.Open(pngPath)
-	if err != nil {
-		return fmt.Errorf("error opening PNG file: %w", err)
-	}
-	defer pngFile.Close()
-
-	// Read PNG signature (8 bytes)
-	signature := make([]byte, 8)
-	_, err = pngFile.Read(signature)
-	if err != nil || !bytes.Equal(signature, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) {
-		return fmt.Errorf("not a valid PNG file")
-	}
-
-	// Buffer to store modified PNG data
-	var outputBuffer bytes.Buffer
-	outputBuffer.Write(signature) // Write PNG signature
-
-	// Process PNG chunks
-	for {
-		// Read chunk length (4 bytes)
-		lengthBytes := make([]byte, 4)
-		_, err := pngFile.Read(lengthBytes)
-		if err == io.EOF {
-			break // End of file
-		} else if err != nil {
-			return fmt.Errorf("error reading chunk length: %w", err)
-		}
-		length := binary.BigEndian.Uint32(lengthBytes)
-
-		// Read chunk type (4 bytes)
-		chunkType := make([]byte, 4)
-		_, err = pngFile.Read(chunkType)
-		if err != nil {
-			return fmt.Errorf("error reading chunk type: %w", err)
-		}
-
-		// Read chunk data + CRC
-		chunkData := make([]byte, length+4) // +4 for CRC
-		_, err = pngFile.Read(chunkData)
-		if err != nil {
-			return fmt.Errorf("error reading chunk data: %w", err)
-		}
-
-		// If it's the PLTE chunk, replace it
-		if string(chunkType) == "PLTE" {
-			fmt.Println("Replacing PLTE chunk with ACT palette...")
-
-			// Trim ACT palette to 256 colors (max PNG palette size)
-			if len(actPalette) > 768 {
-				actPalette = actPalette[:768]
-			}
-
-			// Write new PLTE chunk
-			newLength := uint32(len(actPalette))
-			binary.Write(&outputBuffer, binary.BigEndian, newLength)
-			outputBuffer.Write(chunkType)
-
-			// Write new palette data
-			outputBuffer.Write(actPalette)
-
-			// Compute new CRC
-			crc := crc32.NewIEEE()
-			crc.Write(chunkType)
-			crc.Write(actPalette)
-			newCRC := crc.Sum32()
-
-			// Write new CRC
-			binary.Write(&outputBuffer, binary.BigEndian, newCRC)
-		} else {
-			// Write the original chunk unchanged
-			outputBuffer.Write(lengthBytes)
-			outputBuffer.Write(chunkType)
-			outputBuffer.Write(chunkData)
-		}
-	}
-
-	// Save modified PNG
-	outputFile, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("error creating output file: %w", err)
-	}
-	defer outputFile.Close()
-
-	_, err = outputFile.Write(outputBuffer.Bytes())
-	if err != nil {
-		return fmt.Errorf("error writing modified PNG: %w", err)
-	}
-
-	fmt.Println("Palette replaced successfully using ACT file! Saved as:", outputPath)
-	return nil
-}
-
 func replacePaletteInMemory(imgBuffer *bytes.Buffer, palette []uint32) error {
 	// Read PNG signature (8 bytes)
 	signature := make([]byte, 8)
@@ -850,7 +741,16 @@ func saveImageToPNG(sff *Sff, s *Sprite, data []byte) error {
 	// Extract filename without extension
 	baseFilename := sff.filename[:len(sff.filename)-4]
 	pngFilename := fmt.Sprintf("%v %v %v.png", baseFilename, s.Group, s.Number)
+	tsvFilename := fmt.Sprintf("%v.tsv", baseFilename)
 	// fmt.Printf("Saving %v with Palette id=%v\n", pngFilename, s.palidx)
+
+	// Create or Open the TSV file
+	tsvFile, err := os.OpenFile(tsvFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("Error creating file %v: %v", tsvFilename, err)
+	}
+	tsvFile.WriteString(fmt.Sprintf("%v,%v\t%v\t%v\t%v\t%v\t%v\n", s.Group, s.Number, s.Size[0], s.Size[1], s.palidx, s.rle, s.coldepth))
+	tsvFile.Close()
 
 	// Save the image to a file
 	fo, err := os.Create(pngFilename)
@@ -862,33 +762,19 @@ func saveImageToPNG(sff *Sff, s *Sprite, data []byte) error {
 	return png.Encode(fo, img)
 }
 
-func saveImageToPNG2(sff *Sff, s *Sprite, fi io.Reader, datasize uint32) error {
-	// Extract filename without extension
-	baseFilename := sff.filename[:len(sff.filename)-4]
-	pngFilename := fmt.Sprintf("%v %v %v.png", baseFilename, s.Group, s.Number)
-	savePalette(sff.palList.Get(s.palidx), fmt.Sprintf("%v %v %v.act", s.Group, s.Number, baseFilename))
-	// fmt.Printf("Saving %v with Palette id=%v\n", pngFilename, s.palidx)
-
-	// Save the image to a file
-	fo, err := os.Create(pngFilename)
-	if err != nil {
-		return fmt.Errorf("Error creating file %v: %v", pngFilename, err)
-	}
-
-	// Copy the image data from fi to fo
-	_, err = io.CopyN(fo, fi, int64(datasize-4))
-	fo.Close()
-	if err != nil {
-		return fmt.Errorf("Error copying image data: %v", err)
-	}
-
-	return replacePalette(pngFilename, fmt.Sprintf("%v %v %v.act", s.Group, s.Number, baseFilename), "fix_"+pngFilename)
-}
-
 func saveImageToPNG3(sff *Sff, s *Sprite, fi io.Reader, datasize uint32) error {
 	// Extract filename without extension
 	baseFilename := sff.filename[:len(sff.filename)-4]
 	pngFilename := fmt.Sprintf("%v %v %v.png", baseFilename, s.Group, s.Number)
+	tsvFilename := fmt.Sprintf("%v.tsv", baseFilename)
+
+	// Create or Open the TSV file
+	tsvFile, err := os.OpenFile(tsvFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("Error creating file %v: %v", tsvFilename, err)
+	}
+	tsvFile.WriteString(fmt.Sprintf("%v,%v\t%v\t%v\t%v\t%v\t%v\n", s.Group, s.Number, s.Size[0], s.Size[1], s.palidx, s.rle, s.coldepth))
+	tsvFile.Close()
 
 	// Create an in-memory buffer to store the image data
 	var imgBuffer bytes.Buffer
@@ -952,31 +838,31 @@ func (s *Sprite) readV2(f *physfs.File, offset int64, datasize uint32, sff *Sff)
 		}
 
 		switch format {
-		case 2, 3, 4:
-			switch format {
-			case 2:
-				px = s.Rle8Decode(srcPx)
-			case 3:
-				px = s.Rle5Decode(srcPx)
-			case 4:
-				px = s.Lz5Decode(srcPx)
-			}
-			if err := saveImageToPNG(sff, s, px); err != nil {
-				return err
-			}
-			fmt.Printf("len(px)=%v w:%v h:%v\n", len(px), s.Size[0], s.Size[1])
-			img_tag := C.CString(fmt.Sprintf("%v_%v.png", s.Group, s.Number))
-			C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
-			defer C.free(unsafe.Pointer(img_tag))
-		case 10, 11, 12:
-			// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
-			if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
-				return err
-			}
-			C.calculate_image3((*C.FILE)(unsafe.Pointer(f)), C.int(s.Size[0]), C.int(s.Size[1]))
-		default:
-			return fmt.Errorf("Unknown format")
-		}
+			case 2, 3, 4:
+				switch format {
+				case 2:
+					px = s.Rle8Decode(srcPx)
+				case 3:
+					px = s.Rle5Decode(srcPx)
+				case 4:
+					px = s.Lz5Decode(srcPx)
+				}
+				if err := saveImageToPNG(sff, s, px); err != nil {
+					return err
+				}
+				// fmt.Printf("len(px)=%v w:%v h:%v\n", len(px), s.Size[0], s.Size[1])
+				// img_tag := C.CString(fmt.Sprintf("%v_%v.png", s.Group, s.Number))
+				// C.calculate_image((*C.uchar)(unsafe.Pointer(&px[0])), C.int(s.Size[0]), C.int(s.Size[1]), img_tag)
+				// defer C.free(unsafe.Pointer(img_tag))
+			case 10, 11, 12:
+				// fmt.Printf("PNG Format %v. Group:%v Num:%v\n", format, s.Group, s.Number)
+				if err := saveImageToPNG3(sff, s, f, datasize); err != nil {
+					return err
+				}
+				// C.calculate_image3((*C.FILE)(unsafe.Pointer(f)), C.int(s.Size[0]), C.int(s.Size[1]))
+			default:
+				return fmt.Errorf("Unknown format")
+		}	
 	}
 	return nil
 }

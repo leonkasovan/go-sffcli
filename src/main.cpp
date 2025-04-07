@@ -1,5 +1,9 @@
 /*
-g++ -o sffcli.exe src/main.cpp -lpng
+RELEASE BUILD:
+g++ -O3 -DNDEBUG -o sffcli.exe src/main.cpp -lpng
+
+DEBUG BUILD:
+g++ -fsanitize=address -static-libasan -g -o sffcli.exe src/main.cpp -lpng
 */
 
 #include <stdio.h>
@@ -345,7 +349,7 @@ uint8_t* Lz5Decode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
     }
 
     // Decode the LZ5 data
-    size_t i = 0, j = 0, n = 0;
+    long i = 0, j = 0, n = 0;
     uint8_t ct = srcPx[i], cts = 0, rb = 0, rbc = 0;
     if (i < srcLen - 1) {
         i++;
@@ -381,9 +385,19 @@ uint8_t* Lz5Decode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
                     rb = rbc = 0;
                 }
             }
-            while (n-- > 0 && j < dstLen) {
-                dstPx[j] = dstPx[j - d];
-                j++;
+            // while (n-- > 0 && j < dstLen) {
+            //     dstPx[j] = dstPx[j - d];
+            //     j++;
+            // }
+            for (;;){
+                if (j < dstLen) {
+					dstPx[j] = dstPx[j-d];
+					j++;
+				}
+				n--;
+				if (n < 0) {
+					break;
+				}
             }
         } else {
             if ((d & 0xe0) == 0) {
@@ -835,8 +849,8 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 4:
             // printf("Decoding sprite with LZ55 palidx=%d\n", s->palidx);
-            // px = Lz5Decode(s, srcPx, srcLen);
-            px = TestDecode(s, srcPx, srcLen);
+            px = Lz5Decode(s, srcPx, srcLen);
+            // px = TestDecode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
                 uint32_t* sff_palette = sff->palList.palettes[s->palidx];

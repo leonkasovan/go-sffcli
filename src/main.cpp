@@ -10,9 +10,10 @@ g++ -o sffcli.exe src/main.cpp -lpng
 #include <dirent.h>
 #include <map>
 #include <array>
+#include <vector>
 #include "png.h"
 
-#define MAX_PAL_NO 32
+#define MAX_PAL_NO 256
 
 // Constants for the hash function
 #define PRIME 0x9E3779B1
@@ -47,6 +48,8 @@ typedef struct {
     Sprite** sprites;
     PaletteList palList;
     char filename[256];
+    // std::vector<std::array<png_color, 256>> palettes;
+    std::vector<png_color*> palettes;
 } Sff;
 
 Sprite* newSprite() {
@@ -656,7 +659,7 @@ int readPcxHeader(Sprite* s, FILE* file, uint64_t offset) {
     return 0;
 }
 
-int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t datasize, uint32_t nextSubheader, Sprite* prev, PaletteList* pl, bool c00) {
+int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t datasize, uint32_t nextSubheader, Sprite* prev, std::vector<png_color*>* palettes, bool c00) {
     if (nextSubheader > offset) {
         // Ignore datasize except last
         datasize = nextSubheader - offset;
@@ -701,22 +704,29 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     }
 
     if (paletteSame) {
+        png_color* png_palette;
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         if (prev != NULL) {
             s->palidx = prev->palidx;
             // printf("Info: Same palette (%d,%d) with (%d,%d) = %d\n", s->Group, s->Number, prev->Group, prev->Number, prev->palidx);
         }
         if (s->palidx < 0) {
-            // s->palidx, _ = pl.NewPal()
-            s->palidx = pl->numPalettes++;
+            png_color* palette = new png_color[256];
+            palettes->push_back(palette);
+            s->palidx = palettes->size() - 1;
+            png_palette = palette;
             printf("Warning: incompleted code for handling palette in main.cpp line %d\n", __LINE__);
-        }
-        png_color png_palette[256];
-        uint32_t* pal = pl->palettes[s->palidx];
-        for (int i = 0; i < 256; i++) {
-            png_palette[i].red = (pal[i] >> 0) & 0xFF;
-            png_palette[i].green = (pal[i] >> 8) & 0xFF;
-            png_palette[i].blue = (pal[i] >> 16) & 0xFF;
+        } else {
+            // fprintf(stderr, "Warning: palette index %d\npal_len=%d\n", s->palidx, palettes->size());
+            png_palette = palettes->at(s->palidx);
+            // for (int i = 0; i < 256; i++) {
+            //     png_palette[i].red = pal[i].red;
+            //     png_palette[i].green = pal[i].green;
+            //     png_palette[i].blue = pal[i].blue;
+                // png_palette[i].red = 100;
+                // png_palette[i].green = 200;
+                // png_palette[i].blue = 0;
+            // }
         }
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         uint8_t* px = RlePcxDecode(s, srcPx, srcLen);
@@ -725,24 +735,15 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             fprintf(stderr, "Error decoding PCX sprite data\n");
             return -1;
         }
-        palHash = fast_hash(pal, 256);
+        // palHash = fast_hash(pal, 256);
         save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
     } else {
-        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
-        uint32_t* pal;
-        // s.palidx, pal = pl.NewPal()
-        s->palidx = pl->numPalettes++;
-        if (s->palidx >= MAX_PAL_NO) {
-            // printf("[DEBUG] src/main.cpp:%d max palette reach %d\n", __LINE__, pl->numPalettes);
-            s->palidx = MAX_PAL_NO - 1;
-        }
-        pal = pl->palettes[s->palidx];
+        png_color* png_palette = new png_color[256];
         if (c00) {
             fseek(file, offset + datasize - 768, 0);
         }
         uint8_t rgb[3];
-        png_color png_palette[256];
 
         for (int i = 0;i < 256;i++) {
             if (fread(rgb, sizeof(uint8_t), 3, file) != 3) {
@@ -753,11 +754,12 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             if (i == 0) {
                 alpha = 0;
             }
-            pal[i] = alpha << 24 | rgb[2] << 16 | rgb[1] << 8 | rgb[0];
             png_palette[i].red = rgb[0];
             png_palette[i].green = rgb[1];
             png_palette[i].blue = rgb[2];
         }
+        palettes->push_back(png_palette);
+        s->palidx = palettes->size() - 1;
         // savePalette(pal, fmt.Sprintf("%v %v %v.act", "char_pal", s.Group, s.Number))
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         uint8_t* px = RlePcxDecode(s, srcPx, srcLen);
@@ -767,13 +769,12 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             return -1;
         }
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
-        palHash = fast_hash(pal, 256);
+        // palHash = fast_hash(pal, 256);
         save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
-
     }
-    // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palHash=%d palSize=%d srcLen=%ld ", __LINE__, ps, paletteSame, s->palidx, palHash, palSize, srcLen);
-    printf("%u\n", palHash);
+    // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palLen=%d palSize=%d srcLen=%ld\n", __LINE__, ps, paletteSame, s->palidx, palettes->size(), palSize, srcLen);
+    // printf("%u\n", palHash);
 
     return 0;
 }
@@ -864,6 +865,21 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         }
     }
     return 0;
+}
+
+void spriteCopy(Sprite* dst, const Sprite* src) {
+    dst->Pal = src->Pal;
+    dst->Group = src->Group;
+    dst->Number = src->Number;
+    dst->Size[0] = src->Size[0];
+    dst->Size[1] = src->Size[1];
+    dst->Offset[0] = src->Offset[0];
+    dst->Offset[1] = src->Offset[1];
+    // if (dst->palidx < 0) {
+    dst->palidx = src->palidx;
+    // }
+    dst->rle = src->rle;
+    dst->coldepth = src->coldepth;
 }
 
 // function to extract SFF
@@ -974,9 +990,9 @@ int extractSff(Sff* sff, const char* filename) {
         }
         if (size == 0) {
             if (indexOfPrevious < i) {
-                // auto dst = sff->sprites[i];
-                // auto src = sff->sprites[indexOfPrevious];
-                // dst.shareCopy(src)
+                Sprite* dst = sff->sprites[i];
+                Sprite* src = sff->sprites[indexOfPrevious];
+                spriteCopy(dst, src);
                 // printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
             } else {
                 printf("Warning: Sprite %d has no size\n", i);
@@ -990,8 +1006,7 @@ int extractSff(Sff* sff, const char* filename) {
                 }
                 // printf("Info: Sprite[%d] (%d,%d) offset=%d size=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, shofs + 32, size);
                 // printf("Sprite[%d] (%d,%d) ", i, sff->sprites[i]->Group, sff->sprites[i]->Number);
-                if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character) != 0) {
-                    // if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character && (prev == NULL || sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0)) != 0) {
+                if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palettes, character) != 0) {
                     fclose(file);
                     return -1;
                 }
@@ -1010,9 +1025,21 @@ int extractSff(Sff* sff, const char* filename) {
         } else {
             shofs += 28;
         }
-
     }
     fclose(file);
+
+    // clean up sprite
+    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+        free(sff->sprites[i]);
+    }
+    free(sff->sprites);
+
+    // clean up sff->palettes
+    for (png_color* palette : sff->palettes) {
+        delete[] palette;
+    }
+    sff->palettes.clear();
+
     return 0;
 }
 

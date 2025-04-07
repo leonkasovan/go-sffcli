@@ -14,6 +14,9 @@ g++ -o sffcli.exe src/main.cpp -lpng
 
 #define MAX_PAL_NO 32
 
+// Constants for the hash function
+#define PRIME 0x9E3779B1
+
 typedef struct {
     uint8_t Ver3, Ver2, Ver1, Ver0;
     uint32_t FirstSpriteHeaderOffset;
@@ -51,6 +54,16 @@ Sprite* newSprite() {
     memset(sprite, 0, sizeof(Sprite));
     sprite->palidx = -1;
     return sprite;
+}
+
+// Fast hash function for a 256-element array of uint32_t
+uint32_t fast_hash(const uint32_t* data, size_t len) {
+    uint32_t h = len * PRIME;
+    for (size_t i = 0; i < len; ++i) {
+        h = ((h + data[i]) << 13) | ((h + data[i]) >> (32 - 13)); // Rotate bits
+        h *= PRIME;
+    }
+    return h;
 }
 
 void savePalette(uint32_t* palette, const char* filename) {
@@ -544,7 +557,7 @@ void save_png(const char* filename, int img_width, int img_height, png_byte* img
         fprintf(stderr, "Failed to open file for writing\n");
         return;
     }
-    printf("%s\n", filename);
+    // printf("%s\n", filename);
 
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) {
@@ -661,6 +674,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     }
 
     fseek(file, offset + 128, SEEK_SET);
+    uint32_t palHash = 0;
     uint32_t palSize;
     if (c00 || paletteSame) {
         palSize = 0;
@@ -685,13 +699,12 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         fprintf(stderr, "Error reading sprite PCX data pixel\n");
         return -1;
     }
-    // printf("[DEBUG] src/main.cpp:%d srcLen=%ld\n", __LINE__, srcLen);
 
     if (paletteSame) {
-        printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         if (prev != NULL) {
             s->palidx = prev->palidx;
-            printf("Info: Same palette (%d,%d) with (%d,%d) = %d\n", s->Group, s->Number, prev->Group, prev->Number, prev->palidx);
+            // printf("Info: Same palette (%d,%d) with (%d,%d) = %d\n", s->Group, s->Number, prev->Group, prev->Number, prev->palidx);
         }
         if (s->palidx < 0) {
             // s->palidx, _ = pl.NewPal()
@@ -712,15 +725,16 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             fprintf(stderr, "Error decoding PCX sprite data\n");
             return -1;
         }
+        palHash = fast_hash(pal, 256);
         save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        free(px);
     } else {
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         uint32_t* pal;
         // s.palidx, pal = pl.NewPal()
         s->palidx = pl->numPalettes++;
         if (s->palidx >= MAX_PAL_NO) {
-            printf("[DEBUG] src/main.cpp:%d max palette reach %d\n", __LINE__, pl->numPalettes);
+            // printf("[DEBUG] src/main.cpp:%d max palette reach %d\n", __LINE__, pl->numPalettes);
             s->palidx = MAX_PAL_NO - 1;
         }
         pal = pl->palettes[s->palidx];
@@ -747,18 +761,19 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         // savePalette(pal, fmt.Sprintf("%v %v %v.act", "char_pal", s.Group, s.Number))
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         uint8_t* px = RlePcxDecode(s, srcPx, srcLen);
-        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         free(srcPx);
-        if (px) {
-            // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
-            save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-            free(px);
-            // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
-        } else {
+        if (!px) {
             fprintf(stderr, "Error decoding PCX sprite data\n");
             return -1;
         }
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        palHash = fast_hash(pal, 256);
+        save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        free(px);
+
     }
+    // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palHash=%d palSize=%d srcLen=%ld ", __LINE__, ps, paletteSame, s->palidx, palHash, palSize, srcLen);
+    printf("%u\n", palHash);
 
     return 0;
 }
@@ -962,7 +977,7 @@ int extractSff(Sff* sff, const char* filename) {
                 // auto dst = sff->sprites[i];
                 // auto src = sff->sprites[indexOfPrevious];
                 // dst.shareCopy(src)
-                printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
+                // printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
             } else {
                 printf("Warning: Sprite %d has no size\n", i);
                 sff->sprites[i]->palidx = 0;
@@ -973,7 +988,8 @@ int extractSff(Sff* sff, const char* filename) {
                 if (sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0) {
                     character = false;
                 }
-                printf("Info: Sprite[%d] (%d,%d) offset=%d size=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, shofs + 32, size);
+                // printf("Info: Sprite[%d] (%d,%d) offset=%d size=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, shofs + 32, size);
+                // printf("Sprite[%d] (%d,%d) ", i, sff->sprites[i]->Group, sff->sprites[i]->Number);
                 if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character) != 0) {
                     // if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character && (prev == NULL || sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0)) != 0) {
                     fclose(file);

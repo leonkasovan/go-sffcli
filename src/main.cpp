@@ -564,7 +564,7 @@ uint8_t* RlePcxDecode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
     return dstPx;
 }
 
-void save_png(const char* filename, int img_width, int img_height, png_byte* img_data, png_color* palette) {
+void save_as_png(const char* filename, int img_width, int img_height, png_byte* img_data, png_color* palette) {
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
         fprintf(stderr, "Failed to open file for writing\n");
@@ -746,7 +746,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             return -1;
         }
         // palHash = fast_hash(pal, 256);
-        save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
     } else {
         png_color* png_palette = new png_color[256];
@@ -780,7 +780,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         }
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         // palHash = fast_hash(pal, 256);
-        save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
     }
     // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palLen=%d palSize=%d srcLen=%ld\n", __LINE__, ps, paletteSame, s->palidx, palettes->size(), palSize, srcLen);
@@ -788,6 +788,34 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
 
     return 0;
 }
+
+void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
+    char pngFilename[256];
+    snprintf(pngFilename, sizeof(pngFilename), "kfm %d %d.png", s->Group, s->Number);
+    
+    // Create a PNG file
+    FILE* pngFile = fopen(pngFilename, "wb");
+    if (!pngFile) {
+        fprintf(stderr, "Error creating PNG file %s\n", pngFilename);
+        return;
+    }    
+    char *buffer = (char *)malloc(data_size-4);
+    if (!buffer) {
+        // Handle memory allocation failure
+        fprintf(stderr, "Error allocating memory for PNG data\n");
+        fclose(pngFile);
+        return;
+    }
+
+    size_t read = fread(buffer, 1, data_size-4, file);
+    if (read > 0) {
+        fwrite(buffer, 1, read, pngFile);
+    }
+    free(buffer);
+    fclose(pngFile);
+    printf("%s\n", pngFilename);
+}
+
 int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, Sff* sff) {
     uint8_t* px = NULL;
     if (s->rle > 0) return -1;
@@ -847,7 +875,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 free(px);
             } else {
                 fprintf(stderr, "Error decoding RLE8 sprite data\n");
@@ -855,8 +883,23 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             }
             break;
         case 3:
-            printf("Decoding sprite with RLE5\n");
+            // printf("Decoding sprite with RLE5\n");
             px = Rle5Decode(s, srcPx, srcLen);
+            free(srcPx);
+            if (px) {
+                uint32_t* sff_palette = sff->palList.palettes[s->palidx];
+                png_color png_palette[256];
+                for (int i = 0; i < 256; i++) {
+                    png_palette[i].red = (sff_palette[i] >> 0) & 0xFF;
+                    png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
+                    png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
+                }
+                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                free(px);
+            } else {
+                fprintf(stderr, "Error decoding RLE5 sprite data\n");
+                return -1;
+            }
             break;
         case 4:
             // printf("Decoding sprite with LZ55 palidx=%d\n", s->palidx);
@@ -871,7 +914,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 free(px);
             } else {
                 fprintf(stderr, "Error decoding LZ5 sprite data\n");
@@ -879,13 +922,16 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             }
             break;
         case 10:
-            printf("Decoding sprite with PNG10\n");
+            printf("Decoding sprite with PNG10: ");
+            save_png(s, file, datasize, sff);
             break;
         case 11:
-            printf("Decoding sprite with PNG11\n");
+            printf("Decoding sprite with PNG11: ");
+            save_png(s, file, datasize, sff);
             break;
         case 12:
-            printf("Decoding sprite with PNG12\n");
+            printf("Decoding sprite with PNG12: ");
+            save_png(s, file, datasize, sff);
             break;
         }
     }

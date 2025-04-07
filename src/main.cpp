@@ -385,10 +385,6 @@ uint8_t* Lz5Decode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
                     rb = rbc = 0;
                 }
             }
-            // while (n-- > 0 && j < dstLen) {
-            //     dstPx[j] = dstPx[j - d];
-            //     j++;
-            // }
             for (;;){
                 if (j < dstLen) {
 					dstPx[j] = dstPx[j-d];
@@ -433,21 +429,21 @@ uint8_t* Rle8Decode(Sprite* s, uint8_t* srcPx, int srcLen) {
         return NULL;
     }
 
-    int dstLen = s->Size[0] * s->Size[1];
+    size_t dstLen = s->Size[0] * s->Size[1];
     uint8_t* dstPx = (uint8_t*) malloc(dstLen);
     if (!dstPx) {
         fprintf(stderr, "Error allocating memory for RLE decoded data\n");
         return NULL;
     }
-    int i, j = 0;
+    long i = 0, j = 0;
     // Decode the RLE data
     while (j < dstLen) {
-        int n = 1;
+        long n = 1;
         uint8_t d = srcPx[i];
         if (i < (srcLen - 1)) {
             i++;
         }
-        if (d & 0xc0 == 0x40) {
+        if ((d & 0xc0) == 0x40) {
             n = d & 0x3f;
             d = srcPx[i];
             if (i < (srcLen - 1)) {
@@ -840,8 +836,23 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
 
         switch (format) {
         case 2:
-            printf("Decoding sprite with RLE8\n");
+            // printf("Decoding sprite with RLE8\n");
             px = Rle8Decode(s, srcPx, srcLen);
+            free(srcPx);
+            if (px) {
+                uint32_t* sff_palette = sff->palList.palettes[s->palidx];
+                png_color png_palette[256];
+                for (int i = 0; i < 256; i++) {
+                    png_palette[i].red = (sff_palette[i] >> 0) & 0xFF;
+                    png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
+                    png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
+                }
+                save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                free(px);
+            } else {
+                fprintf(stderr, "Error decoding RLE8 sprite data\n");
+                return -1;
+            }
             break;
         case 3:
             printf("Decoding sprite with RLE5\n");
@@ -863,7 +874,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                 save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 free(px);
             } else {
-                fprintf(stderr, "Error decoding LZ55 sprite data\n");
+                fprintf(stderr, "Error decoding LZ5 sprite data\n");
                 return -1;
             }
             break;

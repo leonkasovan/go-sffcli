@@ -23,7 +23,7 @@ typedef struct {
 } SffHeader;
 
 typedef struct {
-    uint32_t* palettes[MAX_PAL_NO];
+    uint32_t palettes[MAX_PAL_NO][256];
     int paletteMap[MAX_PAL_NO];
     int numPalettes;
 } PaletteList;
@@ -45,14 +45,6 @@ typedef struct {
     PaletteList palList;
     char filename[256];
 } Sff;
-
-void initPaletteList(PaletteList* pl) {
-    for (int i = 0; i < MAX_PAL_NO; i++) {
-        pl->palettes[i] = NULL;
-        pl->paletteMap[i] = i;
-    }
-    pl->numPalettes = 0;
-}
 
 Sprite* newSprite() {
     Sprite* sprite = (Sprite*) malloc(sizeof(Sprite));
@@ -216,7 +208,7 @@ int readSpriteHeaderV1(Sprite* sprite, FILE* file, uint32_t* ofs, uint32_t* size
         return -1;
     }
     // Print sprite header information
-    printf("Sprite v1 Group, Number: %d, %d\n", sprite->Group, sprite->Number);
+    // printf("Sprite v1 Group, Number: %d, %d\n", sprite->Group, sprite->Number);
     return 0;
 }
 
@@ -313,9 +305,9 @@ uint8_t* TestDecode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
         return NULL;
     }
 
-    for (int y = 0; y < s->Size[0]; y++) {
+    for (int y = 0; y < s->Size[1]; y++) {
         uint8_t col = 24 + rand() % 5;
-        for (int x = 0; x < s->Size[1]; x++) {
+        for (int x = 0; x < s->Size[0]; x++) {
             int i = y * s->Size[0] + x;
             dstPx[i] = col;
         }
@@ -502,11 +494,18 @@ uint8_t* RlePcxDecode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
     }
 
     int dstLen = s->Size[0] * s->Size[1];
+    // printf("Allocating memory for PCX decoded data dstLen=%ld srcLen=%ld %dx%d\n", dstLen, srcLen, s->Size[0], s->Size[1]);
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
     uint8_t* dstPx = (uint8_t*) malloc(dstLen);
+    // uint8_t* dstPx;
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+    // dstPx = (uint8_t*) malloc(dstLen * sizeof(uint8_t));
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
     if (!dstPx) {
-        fprintf(stderr, "Error allocating memory for PCX decoded data\n");
+        fprintf(stderr, "Error allocating memory for PCX decoded data dstLen=%ld srcLen=%ld %dx%d\n", dstLen, srcLen, s->Size[0], s->Size[1]);
         return NULL;
     }
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
 
     size_t i = 0, j = 0, k = 0, w = s->Size[0];
     while (j < dstLen) {
@@ -533,7 +532,9 @@ uint8_t* RlePcxDecode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
             }
         }
     }
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
     s->rle = 0;
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
     return dstPx;
 }
 
@@ -543,6 +544,7 @@ void save_png(const char* filename, int img_width, int img_height, png_byte* img
         fprintf(stderr, "Failed to open file for writing\n");
         return;
     }
+    printf("%s\n", filename);
 
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) {
@@ -600,6 +602,166 @@ void save_png(const char* filename, int img_width, int img_height, png_byte* img
     fclose(fp);
 }
 
+int readPcxHeader(Sprite* s, FILE* file, uint64_t offset) {
+    fseek(file, offset, SEEK_SET);
+    uint16_t dummy;
+    if (fread(&dummy, sizeof(uint16_t), 1, file) != 1) {
+        fprintf(stderr, "Error reading uint16_t dummy\n");
+        return -1;
+    }
+    uint8_t encoding, bpp;
+    if (fread(&encoding, sizeof(uint8_t), 1, file) != 1) {
+        fprintf(stderr, "Error reading uint8_t encoding\n");
+        return -1;
+    }
+    if (fread(&bpp, sizeof(uint8_t), 1, file) != 1) {
+        fprintf(stderr, "Error reading uint8_t bpp\n");
+        return -1;
+    }
+    if (bpp != 8) {
+        fprintf(stderr, "Invalid PCX color depth: expected 8-bit, got %d", bpp);
+        return -1;
+    }
+    uint16_t rect[4];
+    if (fread(rect, sizeof(uint16_t), 4, file) != 4) {
+        fprintf(stderr, "Error reading rectangle\n");
+        return -1;
+    }
+    fseek(file, offset + 66, SEEK_SET);
+    uint16_t bpl;
+    if (fread(&bpl, sizeof(uint16_t), 1, file) != 1) {
+        fprintf(stderr, "Error reading bpl\n");
+        return -1;
+    }
+    s->Size[0] = rect[2] - rect[0] + 1;
+    s->Size[1] = rect[3] - rect[1] + 1;
+    if (encoding == 1) {
+        s->rle = bpl;
+    } else {
+        s->rle = 0;
+    }
+    return 0;
+}
+
+int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t datasize, uint32_t nextSubheader, Sprite* prev, PaletteList* pl, bool c00) {
+    if (nextSubheader > offset) {
+        // Ignore datasize except last
+        datasize = nextSubheader - offset;
+    }
+
+    uint8_t ps;
+    if (fread(&ps, sizeof(uint8_t), 1, file) != 1) {
+        fprintf(stderr, "Error reading sprite ps data\n");
+        return -1;
+    }
+    bool paletteSame = ps != 0 && prev != NULL;
+    if (readPcxHeader(s, file, offset) != 0) {
+        fprintf(stderr, "Error reading sprite PCX header\n");
+        return -1;
+    }
+
+    fseek(file, offset + 128, SEEK_SET);
+    uint32_t palSize;
+    if (c00 || paletteSame) {
+        palSize = 0;
+    } else {
+        palSize = 768;
+    }
+    if (datasize < 128 + palSize) {
+        datasize = 128 + palSize;
+    }
+    // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+
+    char pngFilename[256];
+    snprintf(pngFilename, sizeof(pngFilename), "kfm %d %d.png", s->Group, s->Number);
+
+    size_t srcLen = datasize - (128 + palSize);
+    uint8_t* srcPx = (uint8_t*) malloc(srcLen);
+    if (!srcPx) {
+        fprintf(stderr, "Error allocating memory for sprite data\n");
+        return -1;
+    }
+    if (fread(srcPx, srcLen, 1, file) != 1) {
+        fprintf(stderr, "Error reading sprite PCX data pixel\n");
+        return -1;
+    }
+    // printf("[DEBUG] src/main.cpp:%d srcLen=%ld\n", __LINE__, srcLen);
+
+    if (paletteSame) {
+        printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        if (prev != NULL) {
+            s->palidx = prev->palidx;
+            printf("Info: Same palette (%d,%d) with (%d,%d) = %d\n", s->Group, s->Number, prev->Group, prev->Number, prev->palidx);
+        }
+        if (s->palidx < 0) {
+            // s->palidx, _ = pl.NewPal()
+            s->palidx = pl->numPalettes++;
+            printf("Warning: incompleted code for handling palette in main.cpp line %d\n", __LINE__);
+        }
+        png_color png_palette[256];
+        uint32_t* pal = pl->palettes[s->palidx];
+        for (int i = 0; i < 256; i++) {
+            png_palette[i].red = (pal[i] >> 0) & 0xFF;
+            png_palette[i].green = (pal[i] >> 8) & 0xFF;
+            png_palette[i].blue = (pal[i] >> 16) & 0xFF;
+        }
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        uint8_t* px = RlePcxDecode(s, srcPx, srcLen);
+        free(srcPx);
+        if (!px) {
+            fprintf(stderr, "Error decoding PCX sprite data\n");
+            return -1;
+        }
+        save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+    } else {
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        uint32_t* pal;
+        // s.palidx, pal = pl.NewPal()
+        s->palidx = pl->numPalettes++;
+        if (s->palidx >= MAX_PAL_NO) {
+            printf("[DEBUG] src/main.cpp:%d max palette reach %d\n", __LINE__, pl->numPalettes);
+            s->palidx = MAX_PAL_NO - 1;
+        }
+        pal = pl->palettes[s->palidx];
+        if (c00) {
+            fseek(file, offset + datasize - 768, 0);
+        }
+        uint8_t rgb[3];
+        png_color png_palette[256];
+
+        for (int i = 0;i < 256;i++) {
+            if (fread(rgb, sizeof(uint8_t), 3, file) != 3) {
+                fprintf(stderr, "Error reading palette rgb data\n");
+                return -1;
+            }
+            uint8_t alpha = 255;
+            if (i == 0) {
+                alpha = 0;
+            }
+            pal[i] = alpha << 24 | rgb[2] << 16 | rgb[1] << 8 | rgb[0];
+            png_palette[i].red = rgb[0];
+            png_palette[i].green = rgb[1];
+            png_palette[i].blue = rgb[2];
+        }
+        // savePalette(pal, fmt.Sprintf("%v %v %v.act", "char_pal", s.Group, s.Number))
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        uint8_t* px = RlePcxDecode(s, srcPx, srcLen);
+        // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        free(srcPx);
+        if (px) {
+            // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+            save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+            free(px);
+            // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
+        } else {
+            fprintf(stderr, "Error decoding PCX sprite data\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
 int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, Sff* sff) {
     uint8_t* px = NULL;
     if (s->rle > 0) return -1;
@@ -657,8 +819,8 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 4:
             // printf("Decoding sprite with LZ55 palidx=%d\n", s->palidx);
-            px = Lz5Decode(s, srcPx, srcLen);
-            // px = TestDecode(s, srcPx, srcLen);
+            // px = Lz5Decode(s, srcPx, srcLen);
+            px = TestDecode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
                 uint32_t* sff_palette = sff->palList.palettes[s->palidx];
@@ -668,7 +830,6 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                printf("%s\n", pngFilename);
                 save_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 free(px);
             } else {
@@ -692,6 +853,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
 
 // function to extract SFF
 int extractSff(Sff* sff, const char* filename) {
+    bool character = true;
     FILE* file = fopen(filename, "rb");
     if (!file) {
         fprintf(stderr, "Error opening file %s\n", filename);
@@ -709,69 +871,71 @@ int extractSff(Sff* sff, const char* filename) {
         return -1;
     }
 
-    // Allocate memory for palettes
-    // sff->palList.palettes = (uint32_t**) malloc(sff->header.NumberOfPalettes * sizeof(uint32_t*));
-    std::map<std::array<int, 2>, int> uniquePals;
-    sff->palList.numPalettes = 0;
-    for (int i = 0; i < sff->header.NumberOfPalettes && i < MAX_PAL_NO; i++) {
-        fseek(file, sff->header.FirstPaletteHeaderOffset + i * 16, SEEK_SET);
-        sff->palList.palettes[i] = (uint32_t*) malloc(256 * sizeof(uint32_t));
-        if (!sff->palList.palettes[i]) {
-            fprintf(stderr, "Error allocating memory for palette %d\n", i);
-            fclose(file);
-            return -1;
-        }
-        int16_t gn[3];
-        if (fread(gn, sizeof(uint16_t), 3, file) != 3) {
-            fprintf(stderr, "Error reading palette group\n");
-            fclose(file);
-            return -1;
-        }
-        printf("Palette %d: Group %d, Number %d, ColNumber %d\n", i, gn[0], gn[1], gn[2]);
-
-        uint16_t link;
-        if (fread(&link, sizeof(uint16_t), 1, file) != 1) {
-            fprintf(stderr, "Error reading palette link\n");
-            fclose(file);
-            return -1;
-        }
-        // printf("Palette link: %d\n", link);
-
-        uint32_t ofs, siz;
-        if (fread(&ofs, sizeof(uint32_t), 1, file) != 1) {
-            fprintf(stderr, "Error reading palette offset\n");
-            fclose(file);
-            return -1;
-        }
-        if (fread(&siz, sizeof(uint32_t), 1, file) != 1) {
-            fprintf(stderr, "Error reading palette size\n");
-            fclose(file);
-            return -1;
-        }
-
-        // Check if the palette is unique
-        std::array<int, 2> key = { gn[0], gn[1] };
-        if (uniquePals.find(key) == uniquePals.end()) {
-            fseek(file, lofs + ofs, SEEK_SET);
-            if (fread(sff->palList.palettes[i], sizeof(uint32_t), 256, file) != 256) {
-                fprintf(stderr, "Error reading palette data\n");
+    if (sff->header.Ver0 != 1) {
+        // Allocate memory for palettes
+        // sff->palList.palettes = (uint32_t**) malloc(sff->header.NumberOfPalettes * sizeof(uint32_t*));
+        std::map<std::array<int, 2>, int> uniquePals;
+        sff->palList.numPalettes = 0;
+        for (int i = 0; i < sff->header.NumberOfPalettes && i < MAX_PAL_NO; i++) {
+            fseek(file, sff->header.FirstPaletteHeaderOffset + i * 16, SEEK_SET);
+            // sff->palList.palettes[i] = (uint32_t*) malloc(256 * sizeof(uint32_t));
+            // if (!sff->palList.palettes[i]) {
+            //     fprintf(stderr, "Error allocating memory for palette %d\n", i);
+            //     fclose(file);
+            //     return -1;
+            // }
+            int16_t gn[3];
+            if (fread(gn, sizeof(uint16_t), 3, file) != 3) {
+                fprintf(stderr, "Error reading palette group\n");
                 fclose(file);
                 return -1;
             }
-            uniquePals[key] = i;
-            sff->palList.paletteMap[i] = sff->palList.numPalettes;
-            sff->palList.numPalettes++;
-        } else {
-            // If the palette is not unique, use the existing one
-            sff->palList.palettes[i] = sff->palList.palettes[uniquePals[key]];
-            sff->palList.paletteMap[i] = sff->palList.paletteMap[uniquePals[key]];
-            printf("Palette %d(%d,%d) is not unique, using palette %d\n", i, gn[0], gn[1], uniquePals[key]);
+            printf("Palette %d: Group %d, Number %d, ColNumber %d\n", i, gn[0], gn[1], gn[2]);
+
+            uint16_t link;
+            if (fread(&link, sizeof(uint16_t), 1, file) != 1) {
+                fprintf(stderr, "Error reading palette link\n");
+                fclose(file);
+                return -1;
+            }
+            // printf("Palette link: %d\n", link);
+
+            uint32_t ofs, siz;
+            if (fread(&ofs, sizeof(uint32_t), 1, file) != 1) {
+                fprintf(stderr, "Error reading palette offset\n");
+                fclose(file);
+                return -1;
+            }
+            if (fread(&siz, sizeof(uint32_t), 1, file) != 1) {
+                fprintf(stderr, "Error reading palette size\n");
+                fclose(file);
+                return -1;
+            }
+
+            // Check if the palette is unique
+            std::array<int, 2> key = { gn[0], gn[1] };
+            if (uniquePals.find(key) == uniquePals.end()) {
+                fseek(file, lofs + ofs, SEEK_SET);
+                if (fread(sff->palList.palettes[i], sizeof(uint32_t), 256, file) != 256) {
+                    fprintf(stderr, "Error reading palette data\n");
+                    fclose(file);
+                    return -1;
+                }
+                uniquePals[key] = i;
+                sff->palList.paletteMap[i] = sff->palList.numPalettes;
+                sff->palList.numPalettes++;
+            } else {
+                // If the palette is not unique, use the existing one
+                // sff->palList.palettes[i] = sff->palList.palettes[uniquePals[key]];
+                // sff->palList.paletteMap[i] = sff->palList.paletteMap[uniquePals[key]];
+                printf("Palette %d(%d,%d) is not unique, using palette %d\nIncomplete code", i, gn[0], gn[1], uniquePals[key]);
+            }
         }
     }
 
     // Allocate memory for sprites
     sff->sprites = (Sprite**) malloc(sff->header.NumberOfSprites * sizeof(Sprite*));
-    Sprite* prev;
+    Sprite* prev = NULL;
     long shofs = sff->header.FirstSpriteHeaderOffset;
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
         uint32_t xofs, size;
@@ -798,19 +962,29 @@ int extractSff(Sff* sff, const char* filename) {
                 // auto dst = sff->sprites[i];
                 // auto src = sff->sprites[indexOfPrevious];
                 // dst.shareCopy(src)
-                // fprintf(stderr, "Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
+                printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
             } else {
-                fprintf(stderr, "Warning: Sprite %d has no size\n", i);
+                printf("Warning: Sprite %d has no size\n", i);
                 sff->sprites[i]->palidx = 0;
             }
         } else {
             switch (sff->header.Ver0) {
             case 1:
-                // readSpriteDataV1(sff->sprites[i], file, xofs, size, sff);
+                if (sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0) {
+                    character = false;
+                }
+                printf("Info: Sprite[%d] (%d,%d) offset=%d size=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, shofs + 32, size);
+                if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character) != 0) {
+                    // if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palList, character && (prev == NULL || sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0)) != 0) {
+                    fclose(file);
+                    return -1;
+                }
                 break;
             case 2:
-                // printf("readSpriteDataV2(%d) xofs=%d size=%d\n", i, xofs, size);
-                readSpriteDataV2(sff->sprites[i], file, xofs, size, sff);
+                if (readSpriteDataV2(sff->sprites[i], file, xofs, size, sff) != 0) {
+                    fclose(file);
+                    return -1;
+                }
                 break;
             }
             prev = sff->sprites[i];

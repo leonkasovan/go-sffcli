@@ -1,9 +1,9 @@
 /*
 RELEASE BUILD:
-g++ -O3 -DNDEBUG -o sffcli.exe src/main.cpp -lpng
+g++ -O3 -DNDEBUG -o sffcli.exe src/main.cpp -lpng -lz
 
 DEBUG BUILD:
-g++ -fsanitize=address -static-libasan -g -o sffcli.exe src/main.cpp -lpng
+g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli.exe src/main.cpp -lpng -lz
 */
 
 #include <stdio.h>
@@ -883,7 +883,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     return 0;
 }
 
-int replace_png_palette(FILE *in, FILE *out, uint32_t palette[256]) {
+int copy_png_with_palette(FILE *in, FILE *out, uint32_t palette[256]) {
     if (!check_png_signature(in)) {
         fprintf(stderr, "Not a valid PNG file\n");
         return -1;
@@ -978,7 +978,27 @@ int replace_png_palette(FILE *in, FILE *out, uint32_t palette[256]) {
     return 0;
 }
 
-void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
+int copy_png(FILE *in, FILE *out, uint32_t data_size){
+    uint32_t png_len = data_size - 4;
+    char *buffer = (char *)malloc(png_len);
+    if (!buffer) {
+        // Handle memory allocation failure
+        fprintf(stderr, "Error allocating memory for PNG data\n");
+        return -1;
+    }
+
+    size_t read = fread(buffer, png_len, 1, in);
+    if (read != 1) {
+        fprintf(stderr, "Error reading PNG data\n");
+        free(buffer);
+        return -1;
+    }
+    fwrite(buffer, png_len, read, out);
+    free(buffer);
+    return 0;
+}
+
+void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff, bool with_palette){
     char pngFilename[256];
     char basename[256];
     get_basename_no_ext(sff->filename, basename, sizeof(basename));
@@ -990,20 +1010,11 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
         fprintf(stderr, "Error creating PNG file %s\n", pngFilename);
         return;
     }
-    replace_png_palette(file, pngFile, sff->palList.palettes[s->palidx]);
-    // char *buffer = (char *)malloc(data_size-4);
-    // if (!buffer) {
-    //     // Handle memory allocation failure
-    //     fprintf(stderr, "Error allocating memory for PNG data\n");
-    //     fclose(pngFile);
-    //     return;
-    // }
-
-    // size_t read = fread(buffer, 1, data_size-4, file);
-    // if (read > 0) {
-    //     fwrite(buffer, 1, read, pngFile);
-    // }
-    // free(buffer);
+    // Copy the PNG data from the input file to the output file
+    if (with_palette)
+        copy_png_with_palette(file, pngFile, sff->palList.palettes[s->palidx]);
+    else
+        copy_png(file, pngFile, data_size);
     fclose(pngFile);
     printf("%s\n", pngFilename);
 }
@@ -1120,15 +1131,15 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 10:
             printf("PNG10: ");
-            save_png(s, file, datasize, sff);
+            save_png(s, file, datasize, sff, true);
             break;
         case 11:
             printf("PNG11: ");
-            save_png(s, file, datasize, sff);
+            save_png(s, file, datasize, sff, true);
             break;
         case 12:
             printf("PNG12: ");
-            save_png(s, file, datasize, sff);
+            save_png(s, file, datasize, sff, false);
             break;
         }
     }

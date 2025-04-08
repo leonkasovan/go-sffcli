@@ -804,7 +804,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         return -1;
     }
 
-    printf("PCX: ");
+    printf("PCX: ps=%d ", ps);
     if (paletteSame) {
         png_color* png_palette;
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
@@ -838,6 +838,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             return -1;
         }
         // palHash = fast_hash(pal, 256);
+        printf("old_pal=%d ", s->palidx);
         save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
     } else {
@@ -872,6 +873,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         }
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         // palHash = fast_hash(pal, 256);
+        printf("new_pal=%d ", s->palidx);
         save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         free(px);
     }

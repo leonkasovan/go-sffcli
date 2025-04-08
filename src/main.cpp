@@ -63,6 +63,55 @@ Sprite* newSprite() {
     return sprite;
 }
 
+// Extracts basename without extension from a given path
+// The result is written into 'out', which must be at least 'out_size' bytes
+/*
+Usage:
+   const char* paths[] = {
+        "./bird.png",
+        ".\\bird.png",
+        "C:\\tmp\\bird.png",
+        "/usr/tmp/bird.png"
+    };
+
+    char buffer[256];
+
+    for (int i = 0; i < 4; ++i) {
+        get_basename_no_ext(paths[i], buffer, sizeof(buffer));
+        printf("Base name: %s\n", buffer);
+    }
+
+Result:
+Base name: bird
+Base name: bird
+Base name: bird
+Base name: bird
+*/
+void get_basename_no_ext(const char* path, char* out, size_t out_size) {
+    if (!path || !out || out_size == 0) return;
+
+    // Find the last path separator
+    const char* last_slash = strrchr(path, '/');
+    const char* last_backslash = strrchr(path, '\\');
+    const char* filename = path;
+
+    if (last_slash || last_backslash) {
+        filename = (last_slash > last_backslash) ? last_slash + 1 : last_backslash + 1;
+    }
+
+    // Find the last dot (extension)
+    const char* last_dot = strrchr(filename, '.');
+    size_t len = last_dot ? (size_t)(last_dot - filename) : strlen(filename);
+
+    // Ensure we don't overflow the buffer
+    if (len >= out_size) {
+        len = out_size - 1;
+    }
+
+    strncpy(out, filename, len);
+    out[len] = '\0';
+}
+
 // Fast hash function for a 256-element array of uint32_t
 uint32_t fast_hash(const uint32_t* data, size_t len) {
     uint32_t h = len * PRIME;
@@ -700,7 +749,9 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
 
     char pngFilename[256];
-    snprintf(pngFilename, sizeof(pngFilename), "kfm %d %d.png", s->Group, s->Number);
+    char basename[256];
+    get_basename_no_ext(sff->filename, basename, sizeof(basename));
+    snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
 
     size_t srcLen = datasize - (128 + palSize);
     uint8_t* srcPx = (uint8_t*) malloc(srcLen);
@@ -791,7 +842,9 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
 
 void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
     char pngFilename[256];
-    snprintf(pngFilename, sizeof(pngFilename), "kfm %d %d.png", s->Group, s->Number);
+    char basename[256];
+    get_basename_no_ext(sff->filename, basename, sizeof(basename));
+    snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
     
     // Create a PNG file
     FILE* pngFile = fopen(pngFilename, "wb");
@@ -860,7 +913,9 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         }
 
         char pngFilename[256];
-        snprintf(pngFilename, sizeof(pngFilename), "kfm %d %d.png", s->Group, s->Number);
+        char basename[256];
+        get_basename_no_ext(sff->filename, basename, sizeof(basename));
+        snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
 
         switch (format) {
         case 2:
@@ -964,7 +1019,7 @@ int extractSff(Sff* sff, const char* filename) {
 
     // Copy filename to sff structure
     // strncpy(sff->filename, filename, sizeof(sff->filename) - 1);
-    strncpy(sff->filename, "kfmZ.sff", sizeof(sff->filename) - 1);
+    strncpy(sff->filename, filename, sizeof(sff->filename) - 1);
 
     // Read the header
     uint32_t lofs, tofs;
@@ -992,7 +1047,7 @@ int extractSff(Sff* sff, const char* filename) {
                 fclose(file);
                 return -1;
             }
-            printf("Palette %d: Group %d, Number %d, ColNumber %d\n", i, gn[0], gn[1], gn[2]);
+            // printf("Palette %d: Group %d, Number %d, ColNumber %d\n", i, gn[0], gn[1], gn[2]);
 
             uint16_t link;
             if (fread(&link, sizeof(uint16_t), 1, file) != 1) {

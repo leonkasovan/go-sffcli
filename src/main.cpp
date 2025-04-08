@@ -3,7 +3,7 @@ RELEASE BUILD:
 g++ -O3 -DNDEBUG -o sffcli.exe src/main.cpp -lpng -lz
 
 DEBUG BUILD:
-g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli.exe src/main.cpp -lpng -lz
+g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp -lpng -lz
 */
 
 #include <stdio.h>
@@ -1238,7 +1238,7 @@ int extractSff(Sff* sff, const char* filename) {
                 // If the palette is not unique, use the existing one
                 // sff->palList.palettes[i] = sff->palList.palettes[uniquePals[key]];
                 // sff->palList.paletteMap[i] = sff->palList.paletteMap[uniquePals[key]];
-                printf("Palette %d(%d,%d) is not unique, using palette %d\nIncomplete code", i, gn[0], gn[1], uniquePals[key]);
+                printf("Palette %d(%d,%d) is not unique, using palette %d\nIncomplete code\n", i, gn[0], gn[1], uniquePals[key]);
             }
         }
     }
@@ -1298,7 +1298,15 @@ int extractSff(Sff* sff, const char* filename) {
                 }
                 break;
             }
-            prev = sff->sprites[i];
+
+            // if use previous sprite Group 9000 and Number 0 only (fix for SFF v1)
+            if (sff->sprites[i]->Group == 9000) {
+                if (sff->sprites[i]->Number == 0) {
+                    prev = sff->sprites[i];
+                }
+            } else {
+                prev = sff->sprites[i];
+            }
         }
         if (sff->header.Ver0 == 1) {
             shofs = xofs;

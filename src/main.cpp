@@ -12,6 +12,7 @@ g++ -fsanitize=address -static-libasan -g -o sffcli.exe src/main.cpp -lpng
 #include <string.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <zlib.h>
 #include <map>
 #include <array>
 #include <vector>
@@ -110,6 +111,44 @@ void get_basename_no_ext(const char* path, char* out, size_t out_size) {
 
     strncpy(out, filename, len);
     out[len] = '\0';
+}
+
+#define PNG_SIG_BYTES 8
+
+// Helper to write 4-byte big-endian integer
+void write_be32(FILE *f, uint32_t val) {
+    fputc((val >> 24) & 0xFF, f);
+    fputc((val >> 16) & 0xFF, f);
+    fputc((val >> 8) & 0xFF, f);
+    fputc(val & 0xFF, f);
+}
+
+// Helper to compute CRC (uses zlib)
+uint32_t crc(const uint8_t *type_and_data, size_t len) {
+    return crc32(0, type_and_data, len);
+}
+
+// Write a PNG chunk
+void write_chunk(FILE *f, const char *type, const uint8_t *data, size_t length) {
+    write_be32(f, (uint32_t)length);
+    fwrite(type, 1, 4, f);
+    if (length > 0) fwrite(data, 1, length, f);
+    uint8_t *crc_buf = (uint8_t *)malloc(4 + length);
+    memcpy(crc_buf, type, 4);
+    if (length > 0) memcpy(crc_buf + 4, data, length);
+    uint32_t c = crc(crc_buf, 4 + length);
+    write_be32(f, c);
+    free(crc_buf);
+}
+
+// Check PNG signature
+int check_png_signature(FILE *in) {
+    uint8_t sig[PNG_SIG_BYTES];
+    fread(sig, 1, PNG_SIG_BYTES, in);
+    const uint8_t expected_sig[PNG_SIG_BYTES] = {
+        137, 80, 78, 71, 13, 10, 26, 10
+    };
+    return memcmp(sig, expected_sig, PNG_SIG_BYTES) == 0;
 }
 
 // Fast hash function for a 256-element array of uint32_t
@@ -675,6 +714,7 @@ void save_as_png(const char* filename, int img_width, int img_height, png_byte* 
 
     png_destroy_write_struct(&png, &info);
     fclose(fp);
+    puts(filename);
 }
 
 int readPcxHeader(Sprite* s, FILE* file, uint64_t offset) {
@@ -764,6 +804,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         return -1;
     }
 
+    printf("PCX: ");
     if (paletteSame) {
         png_color* png_palette;
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
@@ -840,6 +881,101 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     return 0;
 }
 
+int replace_png_palette(FILE *in, FILE *out, uint32_t palette[256]) {
+    if (!check_png_signature(in)) {
+        fprintf(stderr, "Not a valid PNG file\n");
+        return -1;
+    }
+
+    // Write PNG signature to output
+    const uint8_t png_sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+    fwrite(png_sig, 1, 8, out);
+
+    int found_IHDR = 0;
+    int found_PLTE = 0;
+    int wrote_PLTE = 0;
+    int wrote_tRNS = 0;
+
+    while (!feof(in)) {
+        uint8_t len_bytes[4], type[4];
+        if (fread(len_bytes, 1, 4, in) != 4) break;
+        uint32_t length = (len_bytes[0] << 24) | (len_bytes[1] << 16) | (len_bytes[2] << 8) | len_bytes[3];
+
+        if (fread(type, 1, 4, in) != 4) break;
+
+        uint8_t *data = (uint8_t *)malloc(length);
+        if (fread(data, 1, length, in) != length) {
+            free(data);
+            break;
+        }
+
+        uint8_t crc_buf[4];
+        fread(crc_buf, 1, 4, in); // ignore CRC
+
+        if (memcmp(type, "IHDR", 4) == 0) {
+            found_IHDR = 1;
+
+            if (length != 13) {
+                fprintf(stderr, "Invalid IHDR length\n");
+                free(data);
+                return -1;
+            }
+
+            uint8_t bit_depth = data[8];
+            uint8_t color_type = data[9];
+
+            if (bit_depth != 8 || color_type != 3) {
+                fprintf(stderr, "Only 8-bit indexed PNGs are supported\n");
+                free(data);
+                return -1;
+            }
+
+            // Write IHDR chunk as-is
+            write_chunk(out, "IHDR", data, length);
+        } else if (memcmp(type, "PLTE", 4) == 0) {
+            found_PLTE = 1;
+
+            // Replace PLTE chunk
+            uint8_t new_plte[256 * 3];
+            for (int i = 0; i < 256; i++) {
+                new_plte[i * 3 + 0] = (palette[i] >> 0) & 0xFF;   // R
+                new_plte[i * 3 + 1] = (palette[i] >> 8) & 0xFF;   // G
+                new_plte[i * 3 + 2] = (palette[i] >> 16) & 0xFF;  // B
+            }
+            write_chunk(out, "PLTE", new_plte, 256 * 3);
+            wrote_PLTE = 1;
+
+            // Write tRNS chunk (only index 0 transparent)
+            uint8_t trns[256];
+            for (int i = 0; i < 256; i++) {
+                trns[i] = (i == 0) ? 0 : 255;
+            }
+            write_chunk(out, "tRNS", trns, 256);
+            wrote_tRNS = 1;
+        } else if (memcmp(type, "tRNS", 4) == 0) {
+            // Skip original tRNS (we added our own)
+            free(data);
+            continue;
+        } else {
+            // Copy other chunks as-is
+            write_chunk(out, (char *)type, data, length);
+        }
+
+        free(data);
+
+        // Stop if we hit IEND
+        if (memcmp(type, "IEND", 4) == 0)
+            break;
+    }
+
+    if (!found_IHDR || !found_PLTE || !wrote_PLTE || !wrote_tRNS) {
+        fprintf(stderr, "PNG missing IHDR or PLTE or failed writing replacements\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
     char pngFilename[256];
     char basename[256];
@@ -851,20 +987,21 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff){
     if (!pngFile) {
         fprintf(stderr, "Error creating PNG file %s\n", pngFilename);
         return;
-    }    
-    char *buffer = (char *)malloc(data_size-4);
-    if (!buffer) {
-        // Handle memory allocation failure
-        fprintf(stderr, "Error allocating memory for PNG data\n");
-        fclose(pngFile);
-        return;
     }
+    replace_png_palette(file, pngFile, sff->palList.palettes[s->palidx]);
+    // char *buffer = (char *)malloc(data_size-4);
+    // if (!buffer) {
+    //     // Handle memory allocation failure
+    //     fprintf(stderr, "Error allocating memory for PNG data\n");
+    //     fclose(pngFile);
+    //     return;
+    // }
 
-    size_t read = fread(buffer, 1, data_size-4, file);
-    if (read > 0) {
-        fwrite(buffer, 1, read, pngFile);
-    }
-    free(buffer);
+    // size_t read = fread(buffer, 1, data_size-4, file);
+    // if (read > 0) {
+    //     fwrite(buffer, 1, read, pngFile);
+    // }
+    // free(buffer);
     fclose(pngFile);
     printf("%s\n", pngFilename);
 }
@@ -920,6 +1057,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         switch (format) {
         case 2:
             // printf("Decoding sprite with RLE8\n");
+            printf("RLE8: ");
             px = Rle8Decode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
@@ -939,6 +1077,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 3:
             // printf("Decoding sprite with RLE5\n");
+            printf("RLE5: ");
             px = Rle5Decode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
@@ -958,6 +1097,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 4:
             // printf("Decoding sprite with LZ55 palidx=%d\n", s->palidx);
+            printf("LZ5: ");
             px = Lz5Decode(s, srcPx, srcLen);
             // px = TestDecode(s, srcPx, srcLen);
             free(srcPx);
@@ -977,15 +1117,15 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             }
             break;
         case 10:
-            printf("Decoding sprite with PNG10: ");
+            printf("PNG10: ");
             save_png(s, file, datasize, sff);
             break;
         case 11:
-            printf("Decoding sprite with PNG11: ");
+            printf("PNG11: ");
             save_png(s, file, datasize, sff);
             break;
         case 12:
-            printf("Decoding sprite with PNG12: ");
+            printf("PNG12: ");
             save_png(s, file, datasize, sff);
             break;
         }
@@ -1136,6 +1276,7 @@ int extractSff(Sff* sff, const char* filename) {
                     fclose(file);
                     return -1;
                 }
+                
                 break;
             case 2:
                 if (readSpriteDataV2(sff->sprites[i], file, xofs, size, sff) != 0) {

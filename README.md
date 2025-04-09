@@ -36,7 +36,10 @@ kfmZ 9000 1.act
 ```
 
 ## Build
-`go build -trimpath -ldflags="-s -w" -o sffcli.exe .\src\`
+```
+git clone https://github.com/leonkasovan/go-sffcli.git
+make
+```
 
 ## Dependencies
 `none`
@@ -48,5 +51,5 @@ Download executable from [here](https://github.com/leonkasovan/go-sffcli/release
 ## Todo:
 - create 1 big png image atlas from all sprite
 - convert to DDS (DirectDraw Surface) format
-- output to specific directory
+- output to specific directory (done)
 - customize filename format

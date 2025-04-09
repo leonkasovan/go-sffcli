@@ -18,6 +18,22 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
 #include <vector>
 #include "png.h"
 
+#ifdef _WIN32
+    #include <direct.h>
+    #include <sys/stat.h>
+    #define MKDIR(dir) _mkdir(dir)
+    #define STAT_STRUCT struct _stat
+    #define STAT_FUNC _stat
+    #define S_ISDIR(mode) (((mode) & _S_IFDIR) != 0)
+#else
+    #include <sys/types.h>
+    #include <sys/stat.h>
+    #include <unistd.h>
+    #define MKDIR(dir) mkdir(dir, 0755)
+    #define STAT_STRUCT struct stat
+    #define STAT_FUNC stat
+#endif
+
 #define MAX_PAL_NO 256
 
 // Constants for the hash function
@@ -62,6 +78,30 @@ Sprite* newSprite() {
     memset(sprite, 0, sizeof(Sprite));
     sprite->palidx = -1;
     return sprite;
+}
+
+int createDirectory(const char *name) {
+    STAT_STRUCT st;
+
+    // Check if path exists
+    if (STAT_FUNC(name, &st) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            // Directory already exists
+            return 0;
+        } else {
+            // Exists but is not a directory
+            fprintf(stderr, "Path exists but is not a directory: %s\n", name);
+            return -2;
+        }
+    }
+
+    // Try to create directory
+    if (MKDIR(name) != 0) {
+        fprintf(stderr, "Failed to create directory '%s'\n", name);
+        return -1;
+    }
+
+    return 0; // Success
 }
 
 // Extracts basename without extension from a given path
@@ -655,7 +695,7 @@ uint8_t* RlePcxDecode(Sprite* s, uint8_t* srcPx, size_t srcLen) {
 void save_as_png(const char* filename, int img_width, int img_height, png_byte* img_data, png_color* palette) {
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
-        fprintf(stderr, "Failed to open file for writing\n");
+        fprintf(stderr, "Failed to open file '%s' for writing\n", filename);
         return;
     }
     // printf("%s\n", filename);
@@ -791,8 +831,14 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     char pngFilename[256];
     char basename[256];
     get_basename_no_ext(sff->filename, basename, sizeof(basename));
-    snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
-
+    if (createDirectory(basename) != 0) {
+        return -1;
+    }
+#ifdef _WIN32
+    snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
+#else
+    snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
+#endif
     size_t srcLen = datasize - (128 + palSize);
     uint8_t* srcPx = (uint8_t*) malloc(srcLen);
     if (!srcPx) {
@@ -1002,7 +1048,15 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff, bool with_pal
     char pngFilename[256];
     char basename[256];
     get_basename_no_ext(sff->filename, basename, sizeof(basename));
-    snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
+    if (createDirectory(basename) != 0) {
+        return;
+    }
+#ifdef _WIN32
+    snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
+#else
+    snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
+#endif
+    
     
     // Create a PNG file
     FILE* pngFile = fopen(pngFilename, "wb");
@@ -1065,7 +1119,14 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         char pngFilename[256];
         char basename[256];
         get_basename_no_ext(sff->filename, basename, sizeof(basename));
-        snprintf(pngFilename, sizeof(pngFilename), "%s %d %d.png", basename, s->Group, s->Number);
+        if (createDirectory(basename) != 0) {
+            return -1;
+        }
+#ifdef _WIN32
+        snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
+#else
+        snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
+#endif
 
         switch (format) {
         case 2:

@@ -4,4 +4,5 @@
 *.act
 *.png
 *.tsv
-sffcli
+*sffcli*
+*.SFF

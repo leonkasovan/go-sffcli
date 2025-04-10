@@ -16,6 +16,7 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
 #include <map>
 #include <array>
 #include <vector>
+#include <filesystem>
 #include "png.h"
 
 #ifdef _WIN32
@@ -1393,12 +1394,23 @@ int extractSff(Sff* sff, const char* filename) {
 }
 
 int main(int argc, char* argv[]) {
-    Sff sff;
-
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
-        return -1;
+        // iterate current directory with sff file
+        for (const auto& entry : std::filesystem::directory_iterator(".")) {
+            if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
+                Sff sff;
+                extractSff(&sff, entry.path().string().c_str());
+            }
+        }
+    } else {
+        // iterate all arguments
+        for (int i = 1; i < argc; i++) {
+            Sff sff;
+            extractSff(&sff, argv[i]);
+        }
     }
-    extractSff(&sff, argv[1]);
+    
+
+    
     return 0;
 }

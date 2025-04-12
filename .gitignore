@@ -1,9 +1,14 @@
 *.sff
 *.exe
 *.zip
+*.rar
+*.7z
 *.act
 *.png
 *.tsv
 *sffcli*
 *.SFF
 *.txt
+*.o
+*.a
+

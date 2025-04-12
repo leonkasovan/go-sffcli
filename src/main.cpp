@@ -18,6 +18,8 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
 #include <vector>
 #include <filesystem>
 #include "png.h"
+#define STB_RECT_PACK_IMPLEMENTATION
+#include "stb_rect_pack.h"
 
 #ifdef _WIN32
     #include <direct.h>
@@ -63,6 +65,8 @@ typedef struct {
     int palidx;
     int rle;
     uint8_t coldepth;
+    uint8_t *data;
+    size_t atlas_x, atlas_y;
 } Sprite;
 
 typedef struct {
@@ -73,6 +77,12 @@ typedef struct {
     // std::vector<std::array<png_color, 256>> palettes;
     std::vector<png_color*> palettes;
 } Sff;
+
+typedef struct {
+    uint16_t width, height;
+    struct stbrp_rect* rects;
+    Sff* sff;
+} Atlas;
 
 Sprite* newSprite() {
     Sprite* sprite = (Sprite*) malloc(sizeof(Sprite));
@@ -755,7 +765,7 @@ void save_as_png(const char* filename, int img_width, int img_height, png_byte* 
 
     png_destroy_write_struct(&png, &info);
     fclose(fp);
-    puts(filename);
+    // puts(filename);
 }
 
 int readPcxHeader(Sprite* s, FILE* file, uint64_t offset) {
@@ -851,7 +861,8 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         return -1;
     }
 
-    printf("PCX: ps=%d ", ps);
+    s->data = NULL;
+    // printf("PCX: ps=%d ", ps);
     if (paletteSame) {
         png_color* png_palette;
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
@@ -885,9 +896,10 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
             return -1;
         }
         // palHash = fast_hash(pal, 256);
-        printf("old_pal=%d ", s->palidx);
-        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-        free(px);
+        // printf("old_pal=%d ", s->palidx);
+        // save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        s->data = px;
+        // free(px);
     } else {
         png_color* png_palette = new png_color[256];
         if (c00) {
@@ -920,13 +932,13 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         }
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         // palHash = fast_hash(pal, 256);
-        printf("new_pal=%d ", s->palidx);
-        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-        free(px);
+        // printf("new_pal=%d ", s->palidx);
+        // save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        s->data = px;
+        // free(px);
     }
     // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palLen=%d palSize=%d srcLen=%ld\n", __LINE__, ps, paletteSame, s->palidx, palettes->size(), palSize, srcLen);
     // printf("%u\n", palHash);
-
     return 0;
 }
 
@@ -1129,6 +1141,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
 #endif
 
+        s->data = NULL;
         switch (format) {
         case 2:
             // printf("Decoding sprite with RLE8\n");
@@ -1144,7 +1157,8 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
                 save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-                free(px);
+                s->data = px;
+                // free(px);
             } else {
                 fprintf(stderr, "Error decoding RLE8 sprite data\n");
                 return -1;
@@ -1164,7 +1178,8 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
                 save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-                free(px);
+                s->data = px;
+                // free(px);
             } else {
                 fprintf(stderr, "Error decoding RLE5 sprite data\n");
                 return -1;
@@ -1172,7 +1187,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 4:
             // printf("Decoding sprite with LZ55 palidx=%d\n", s->palidx);
-            printf("LZ5: ");
+            // printf("LZ5: ");
             px = Lz5Decode(s, srcPx, srcLen);
             // px = TestDecode(s, srcPx, srcLen);
             free(srcPx);
@@ -1185,7 +1200,8 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
                 save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
-                free(px);
+                s->data = px;
+                // free(px);
             } else {
                 fprintf(stderr, "Error decoding LZ5 sprite data\n");
                 return -1;
@@ -1221,6 +1237,7 @@ void spriteCopy(Sprite* dst, const Sprite* src) {
     // }
     dst->rle = src->rle;
     dst->coldepth = src->coldepth;
+    // dst->data = src->data;
 }
 
 // function to extract SFF
@@ -1334,7 +1351,7 @@ int extractSff(Sff* sff, const char* filename) {
                 Sprite* dst = sff->sprites[i];
                 Sprite* src = sff->sprites[indexOfPrevious];
                 spriteCopy(dst, src);
-                // printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
+                printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
             } else {
                 printf("Warning: Sprite %d has no size\n", i);
                 sff->sprites[i]->palidx = 0;
@@ -1370,6 +1387,8 @@ int extractSff(Sff* sff, const char* filename) {
                 prev = sff->sprites[i];
             }
         }
+        // Prepare atlas data: dimension, offset, rects coords, etc.
+
         if (sff->header.Ver0 == 1) {
             shofs = xofs;
         } else {
@@ -1377,9 +1396,249 @@ int extractSff(Sff* sff, const char* filename) {
         }
     }
     fclose(file);
+    return 0;
+}
 
+int initAtlas(Atlas *atlas, Sff *sff) {
+    int64_t prod = 0;
+    int crop = 1;
+    int inpcrop = 1;
+    size_t maxw = 0, maxh = 0;
+
+    atlas->sff = sff;
+    atlas->rects = (struct stbrp_rect*) malloc(sff->header.NumberOfSprites * sizeof(struct stbrp_rect));
+    memset(atlas->rects, 0, sff->header.NumberOfSprites * sizeof(struct stbrp_rect));
+    printf("\ninitAtlas\n");
+    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+        size_t x, y;
+        int16_t sprite_width = sff->sprites[i]->Size[0];
+        int16_t sprite_height = sff->sprites[i]->Size[1];
+        uint8_t* p = sff->sprites[i]->data;
+
+        if (!p) {
+            printf("Warning: sprite %d has no data\n", i);
+            continue;
+        }
+
+        sff->sprites[i]->atlas_x = 0;
+        sff->sprites[i]->atlas_y = 0;
+        if (sff->sprites[i]->Size[0] > maxw) {
+            maxw = sff->sprites[i]->Size[0];
+        }
+        if (sff->sprites[i]->Size[1] > maxh) {
+            maxh = sff->sprites[i]->Size[1];
+        }
+        prod += sff->sprites[i]->Size[0] * sff->sprites[i]->Size[1];
+        /* crop input sprite to content */
+        if(inpcrop) {
+            for(y = 0; y < sff->sprites[i]->Size[1] && sprite_height > 0; y++) {
+                // printf("i=%d x=%d y=%d spr_w=%d\n", i, x, y, sff->sprites[i]->Size[0]);
+                for(x = 0; x < sff->sprites[i]->Size[0] && !p[(y * sff->sprites[i]->Size[0] + x)]; x++);
+                if(x < sff->sprites[i]->Size[0]) break;
+                sff->sprites[i]->atlas_y++; sprite_height--;
+            }
+            for(y = sff->sprites[i]->Size[1] - 1; y >= sff->sprites[i]->atlas_y && sprite_height > 0; y--) {
+                for(x = 0; x < sff->sprites[i]->Size[0] && !p[(y * sff->sprites[i]->Size[0] + x)]; x++);
+                if(x < sff->sprites[i]->Size[0]) break;
+                sprite_height--;
+            }
+            for(x = 0; x < sff->sprites[i]->Size[0] && sprite_height > 0 && sprite_width > 0; x++) {
+                for(y = 0; y < sprite_height && !p[((y + sff->sprites[i]->atlas_y) * sff->sprites[i]->Size[0] + x)]; y++);
+                if(y < sprite_height) break;
+                sff->sprites[i]->atlas_x++; sprite_width--;
+            }
+            for(x = sff->sprites[i]->Size[0] - 1; x >= sff->sprites[i]->atlas_x && sprite_height > 0 && sprite_width > 0; x--) {
+                for(y = 0; y < sprite_height && !p[((y + sff->sprites[i]->atlas_y) * sff->sprites[i]->Size[0] + x)]; y++);
+                if(y < sprite_height) break;
+                sprite_width--;
+            }
+            if(sprite_width < 1 || sprite_height < 1) {
+                sprite_width = sprite_height = sff->sprites[i]->atlas_x = sff->sprites[i]->atlas_y = 0;
+            }
+        }
+        atlas->rects[i].id = i;
+        atlas->rects[i].w = sprite_width;
+        atlas->rects[i].h = sprite_height;
+
+        printf("Sprite %d[%d,%d]: %dx%d -> %dx%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number,sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sprite_width, sprite_height);
+    }
+
+    /* calculate an optimal atlas size */
+    size_t i;
+    for(i = 0; i * i < prod; i++);
+    if(i < maxw) i = maxw;
+    for(atlas->width = 1; atlas->width < i; atlas->width <<= 1);
+    i = (prod + atlas->width - 1) / atlas->width;
+    if(i < maxh) i = maxh;
+    for(atlas->height = 1; atlas->height < i; atlas->height <<= 1);
+
+    return 0;
+}
+
+int atlasSave(uint8_t *p, int w, int h, const char *fn, const char *meta) {
+    FILE *f;
+    uint32_t *ptr = (uint32_t*)p, pal[256];
+    uint8_t *data, *pal2 = (uint8_t*)&pal;
+    png_color pngpal[256];
+    png_byte pngtrn[256];
+    png_structp png_ptr;
+    png_infop info_ptr;
+    png_bytep *rows;
+    png_text texts[1] = { 0 };
+    int i, j, nc = 0;
+
+    if(!p || !fn || !*fn || w < 1 || h < 1) return 0;
+    printf("Saving %s\r\n", fn);
+    f = fopen(fn, "wb+");
+    if(!f) { fprintf(stderr,"Unable to write %s\r\n", fn); exit(2); }
+    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if(!png_ptr) { fclose(f); return 0; }
+    info_ptr = png_create_info_struct(png_ptr);
+    if(!info_ptr) { png_destroy_write_struct(&png_ptr, NULL); fclose(f); return 0; }
+    if(setjmp(png_jmpbuf(png_ptr))) { png_destroy_write_struct(&png_ptr, &info_ptr); fclose(f); return 0; }
+    png_init_io(png_ptr, f);
+    png_set_compression_level(png_ptr, 9);
+    png_set_compression_strategy(png_ptr, 0);
+    png_set_filter(png_ptr, PNG_FILTER_TYPE_BASE, PNG_FILTER_VALUE_SUB);
+    rows = (png_bytep*)malloc(h * sizeof(png_bytep));
+    data = (uint8_t*)malloc(w * h);
+    if(!rows || !data) { fprintf(stderr,"Not enough memory\r\n"); exit(1); }
+    /* lets see if we can save this as an indexed image */
+    for(i = 0; i < w * h; i++) {
+        for(j = 0; j < nc && pal[j] != ptr[i]; j++);
+        if(j >= nc) {
+            if(nc == 256) { nc = -1; break; }
+            pal[nc++] = ptr[i];
+        }
+        data[i] = j;
+    }
+    if(nc != -1) {
+        for(i = j = 0; i < nc; i++) {
+            pngpal[i].red = pal2[i * 4 + 0];
+            pngpal[i].green = pal2[i * 4 + 1];
+            pngpal[i].blue = pal2[i * 4 + 2];
+            pngtrn[i] = pal2[i * 4 + 3];
+        }
+        png_set_PLTE(png_ptr, info_ptr, pngpal, nc);
+        png_set_tRNS(png_ptr, info_ptr, pngtrn, nc, NULL);
+        for(i = 0; i < h; i++) rows[i] = data + i * w;
+    } else
+        for(i = 0; i < h; i++) rows[i] = p + i * w * 4;
+    png_set_IHDR(png_ptr, info_ptr, w, h, 8, nc == -1 ? PNG_COLOR_TYPE_RGB_ALPHA : PNG_COLOR_TYPE_PALETTE,
+        PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+    if(meta && *meta) {
+        texts[0].key = (png_charp)"Comment"; texts[0].text = (png_charp)meta;
+        png_set_text(png_ptr, info_ptr, texts, 1);
+    }
+    png_write_info(png_ptr, info_ptr);
+    png_write_image(png_ptr, rows);
+    png_write_end(png_ptr, info_ptr);
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    free(rows);
+    free(data);
+    fclose(f);
+    return 1;
+}
+
+int generateAtlas(Atlas *atlas) {
+    int crop = 1, tofile = 1;
+    uint8_t *o, *p, *src, *dst;
+    char *meta, *s;
+    stbrp_context ctx;
+    stbrp_node *nodes;
+    uint32_t i, j, num = atlas->sff->header.NumberOfSprites;
+
+    nodes = (stbrp_node*)malloc((atlas->width + 1) * sizeof(stbrp_node));
+    if(!nodes) { fprintf(stderr,"Not enough memory\n"); exit(1); }
+    memset(nodes, 0, (atlas->width + 1) * sizeof(stbrp_node));
+    stbrp_init_target(&ctx, atlas->width, atlas->height, nodes, atlas->width + 1);
+    printf("Packing %u sprites into %u x %u atlas\n", num, atlas->width, atlas->height);
+    if(!stbrp_pack_rects(&ctx, atlas->rects, num)) {
+        atlas->height <<= 1;
+        memset(nodes, 0, (atlas->width + 1) * sizeof(stbrp_node));
+        for(i = 0; i < num; i++) atlas->rects[i].was_packed = atlas->rects[i].x = atlas->rects[i].y = 0;
+        stbrp_init_target(&ctx, atlas->width, atlas->height, nodes, atlas->width + 1);
+        if(stbrp_pack_rects(&ctx, atlas->rects, num)) goto ok;
+        fprintf(stderr,"Error, sprites do not fit into %u x %u atlas.\n",atlas-> width, atlas->height);
+        exit(2);
+    }
+ok:
+    free(nodes);
+    
+    // Crop the atlas to the actual size of the sprites
+    if(crop) atlas->width = atlas->height = 0;
+    uint32_t l;
+    for(i = l = 0; i < num; i++) {
+        if(crop) {
+            if(atlas->rects[i].x + atlas->rects[i].w > atlas->width) atlas->width = atlas->rects[i].x + atlas->rects[i].w;
+            if(atlas->rects[i].y + atlas->rects[i].h > atlas->height) atlas->height = atlas->rects[i].y + atlas->rects[i].h;
+        }
+        l += 32 + 256;
+    }
+
+    // Check atlas size after cropping
+    if(atlas->width <= 0 || atlas->height <= 0) {
+        fprintf(stderr,"Error, nothing left after cropping atlas. Size= %u x %u\n",atlas-> width, atlas->height);
+        return -2;
+    }
+    
+    meta = s = (char*)malloc(l);
+    if(!meta) { fprintf(stderr,"Not enough memory for meta data\n"); exit(1); }
+    memset(meta, 0, l);
+    o = (uint8_t*)malloc(atlas->width * atlas->height);
+    if(!o) { fprintf(stderr,"Not enough memory for atlas output image data\n"); exit(1); }
+    memset(o, 0, atlas->width * atlas->height);
+    
+    /* records */
+    char filename[256];
+    for(i = 0; i < num; i++) {
+        snprintf(filename, sizeof(filename), "%d_%d.png", atlas->sff->sprites[i]->Group, atlas->sff->sprites[i]->Number);
+        if(atlas->rects[i].w > 0 && atlas->rects[i].h > 0) {
+            src = atlas->sff->sprites[i]->data + (atlas->sff->sprites[i]->atlas_y * atlas->sff->sprites[i]->Size[0] + atlas->sff->sprites[i]->atlas_x);
+            dst = o + (atlas->width * atlas->rects[i].y + atlas->rects[i].x);
+            for(j = 0; j < atlas->rects[i].h; j++, dst += atlas->width, src += atlas->sff->sprites[i]->Size[0])
+                memcpy(dst, src, atlas->rects[i].w);
+        }
+        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%s\r\n",
+            atlas->rects[i].x, atlas->rects[i].y, atlas->rects[i].w, atlas->rects[i].h,
+            atlas->sff->sprites[i]->atlas_x, atlas->sff->sprites[i]->atlas_y, atlas->sff->sprites[i]->Size[0], atlas->sff->sprites[i]->Size[1],
+            filename);
+    }
+    
+    if (atlas->sff->header.Ver0 == 1) {
+        save_as_png("sprite_atlas.png", atlas->width, atlas->height, o, atlas->sff->palettes[atlas->sff->sprites[0]->palidx]);
+    } else {
+        uint32_t* sff_palette = atlas->sff->palList.palettes[atlas->sff->sprites[0]->palidx];
+        png_color png_palette[256];
+        for (int i = 0; i < 256; i++) {
+            png_palette[i].red = (sff_palette[i] >> 0) & 0xFF;
+            png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
+            png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
+        }
+        save_as_png("sprite_atlas.png", atlas->width, atlas->height, o, png_palette);
+    }
+    free(o);
+    /* save meta info to a separate file too */
+    if(tofile) {
+        FILE* f = fopen("sprite_atlas.txt", "wb+");
+        if(f) {
+            fwrite(meta, 1, s - meta, f);
+            fclose(f);
+        }
+    }
+    free(meta);
+    return 0;
+}
+
+int deinitAtlas(Atlas *atlas) {
+    free(atlas->rects);
+    return 0;
+}
+
+void freeSff(Sff* sff) {
     // clean up sprite
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+        if (sff->sprites[i]->data) free(sff->sprites[i]->data);
         free(sff->sprites[i]);
     }
     free(sff->sprites);
@@ -1389,28 +1648,48 @@ int extractSff(Sff* sff, const char* filename) {
         delete[] palette;
     }
     sff->palettes.clear();
+}
 
-    return 0;
+void printAtlas(Atlas* atlas) {
+    printf("Atlas size: %d x %d\n", atlas->width, atlas->height);
+    for (int i = 0; i < atlas->sff->header.NumberOfSprites; i++) {
+        printf("Sprite %d: %dx%d -> %dx%d\n", i, atlas->sff->sprites[i]->Size[0], atlas->sff->sprites[i]->Size[1], atlas->rects[i].w, atlas->rects[i].h);
+    }
+}
+
+void printSff(Sff* sff) {
+    printf("SFF file: %s\n", sff->filename);
+    printf("Number of sprites: %d\n", sff->header.NumberOfSprites);
+    printf("Number of palettes: %d\n", sff->header.NumberOfPalettes);
+    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+        printf("Sprite %d: Group %d, Number %d, Size %dx%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1]);
+    }
 }
 
 int main(int argc, char* argv[]) {
+    Atlas atlas;
+    Sff sff;
+
     if (argc < 2) {
         // iterate current directory with sff file
         for (const auto& entry : std::filesystem::directory_iterator(".")) {
             if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
-                Sff sff;
                 extractSff(&sff, entry.path().string().c_str());
             }
         }
     } else {
         // iterate all arguments
         for (int i = 1; i < argc; i++) {
-            Sff sff;
             extractSff(&sff, argv[i]);
         }
     }
-    
 
+    initAtlas(&atlas, &sff);
+    // printSff(&sff);
+    // printAtlas(&atlas);
+    generateAtlas(&atlas);
+    freeSff(&sff);
+    deinitAtlas(&atlas);
     
     return 0;
 }

@@ -1080,13 +1080,7 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff, bool with_pal
     if (createDirectory(basename) != 0) {
         return;
     }
-#ifdef _WIN32
-    snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
-#else
-    snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
-#endif
-    
-    
+    snprintf(pngFilename, sizeof(pngFilename), "%s%s%s %d %d.png", basename, SEP, basename, s->Group, s->Number);    
     // Create a PNG file
     FILE* pngFile = fopen(pngFilename, "wb");
     if (!pngFile) {
@@ -1099,7 +1093,7 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff, bool with_pal
     else
         copy_png(file, pngFile, data_size);
     fclose(pngFile);
-    printf("%s\n", pngFilename);
+    // printf("%s\n", pngFilename);
 }
 
 int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, Sff* sff) {
@@ -1151,11 +1145,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         if (createDirectory(basename) != 0) {
             return -1;
         }
-#ifdef _WIN32
-        snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
-#else
-        snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
-#endif
+        snprintf(pngFilename, sizeof(pngFilename), "%s%s%s %d %d.png", basename, SEP, basename, s->Group, s->Number);
 
         s->data = NULL;
         sff->format_usage[format]++;
@@ -1225,15 +1215,15 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             }
             break;
         case 10:
-            printf("PNG10: ");
+            // printf("PNG10: ");
             save_png(s, file, datasize, sff, true);
             break;
         case 11:
-            printf("PNG11: ");
+            // printf("PNG11: ");
             save_png(s, file, datasize, sff, true);
             break;
         case 12:
-            printf("PNG12: ");
+            // printf("PNG12: ");
             save_png(s, file, datasize, sff, false);
             break;
         }
@@ -1268,7 +1258,6 @@ int extractSff(Sff* sff, const char* filename) {
     }
 
     // Copy filename to sff structure
-    // strncpy(sff->filename, filename, sizeof(sff->filename) - 1);
     strncpy(sff->filename, filename, sizeof(sff->filename) - 1);
 
     // Read the header
@@ -1376,7 +1365,6 @@ int extractSff(Sff* sff, const char* filename) {
                     fclose(file);
                     return -1;
                 }
-                
                 break;
             case 2:
                 if (readSpriteDataV2(sff->sprites[i], file, xofs, size, sff) != 0) {
@@ -1595,6 +1583,8 @@ void freeSff(Sff* sff) {
         delete[] palette;
     }
     sff->palettes.clear();
+    sff->palette_usage.clear();
+    sff->format_usage.clear();
 }
 
 void printAtlas(Atlas* atlas) {
@@ -1605,6 +1595,16 @@ void printAtlas(Atlas* atlas) {
 }
 
 void printSff(Sff* sff) {
+    std::map<int, std::string> format_code = {
+        {1, "PCX"},
+        {2, "RLE8"},
+        {3, "RLE5"},
+        {4, "LZ5"},
+        {10, "PNG10"},
+        {11, "PNG11"},
+        {12, "PNG12"}
+    };
+
     // Print SFF information
     printf("SFF file: %s\n", sff->filename);
     printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
@@ -1626,12 +1626,13 @@ void printSff(Sff* sff) {
 
     printf("\nFormat usage:\n");
     for (const auto& pair : sff->format_usage) {
-        std::cout << pair.first << ": " << pair.second << '\n';
+        std::cout << format_code[pair.first] << ": " << pair.second << '\n';
     }
     
     // for (int i = 0; i < sff->header.NumberOfSprites; i++) {
     //     printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
     // }
+    printf("==========================================\n\n");
 }
 
 int main(int argc, char* argv[]) {

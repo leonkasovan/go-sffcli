@@ -86,6 +86,7 @@ typedef struct {
     uint16_t width, height;
     struct stbrp_rect* rects;
     Sff* sff;
+    int usePalette;
 } Atlas;
 
 Sprite* newSprite() {
@@ -1587,11 +1588,12 @@ int extractSff(Sff* sff, const char* filename) {
     return 0;
 }
 
-int initAtlas(Atlas* atlas, Sff* sff) {
+int initAtlas(Atlas* atlas, Sff* sff, int palidx) {
     int64_t prod = 0;
     int crop = 1;
     int inpcrop = 1;
     size_t maxw = 0, maxh = 0;
+    atlas->usePalette = palidx;
 
     atlas->sff = sff;
     atlas->rects = (struct stbrp_rect*) malloc(sff->header.NumberOfSprites * sizeof(struct stbrp_rect));
@@ -1606,6 +1608,13 @@ int initAtlas(Atlas* atlas, Sff* sff) {
         if (!p) {
             // printf("Info: linked sprite[%d]\n", i);
             continue;
+        }
+
+        // Only include sprites with the same atlas palette index
+        if (atlas->usePalette >= 0) {
+            if (sff->sprites[i]->palidx != atlas->usePalette) {
+                continue;
+            }
         }
 
         sff->sprites[i]->atlas_x = 0;
@@ -1733,9 +1742,9 @@ ok:
     get_basename_no_ext(atlas->sff->filename, basename, sizeof(basename));
     snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s.png", basename);
     if (atlas->sff->header.Ver0 == 1) {
-        save_as_png(outFilename, atlas->width, atlas->height, o, atlas->sff->palettes[atlas->sff->sprites[0]->palidx]);
+        save_as_png(outFilename, atlas->width, atlas->height, o, atlas->sff->palettes[atlas->usePalette<0 ? 0 : atlas->usePalette]);
     } else {
-        uint32_t* sff_palette = atlas->sff->palList.palettes[atlas->sff->sprites[0]->palidx];
+        uint32_t* sff_palette = atlas->sff->palList.palettes[atlas->usePalette<0 ? 0 : atlas->usePalette];
         png_color png_palette[256];
         for (int i = 0; i < 256; i++) {
             png_palette[i].red = (sff_palette[i] >> 0) & 0xFF;
@@ -1831,22 +1840,23 @@ void printSff(Sff* sff) {
         std::cout << "\t" << format_code[pair.first] << ": " << pair.second << '\n';
     }
 
-    // for (int i = 0; i < sff->header.NumberOfSprites; i++) {
-    //     printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
-    // }
+    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+        printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
+    }
     printf("____________________________________________________\n\n");
 }
 
 int main(int argc, char* argv[]) {
     Atlas atlas;
     Sff sff;
+    int palidx = 0;
 
     if (argc < 2) {
         // iterate current directory with sff file
         for (const auto& entry : std::filesystem::directory_iterator(".")) {
             if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
                 extractSff(&sff, entry.path().string().c_str());
-                initAtlas(&atlas, &sff);
+                initAtlas(&atlas, &sff, palidx);
                 printSff(&sff);
                 // printAtlas(&atlas);
                 generateAtlas(&atlas);
@@ -1858,7 +1868,7 @@ int main(int argc, char* argv[]) {
         // iterate all arguments
         for (int i = 1; i < argc; i++) {
             extractSff(&sff, argv[i]);
-            initAtlas(&atlas, &sff);
+            initAtlas(&atlas, &sff, palidx);
             printSff(&sff);
             // printAtlas(&atlas);
             generateAtlas(&atlas);
@@ -1866,8 +1876,6 @@ int main(int argc, char* argv[]) {
             deinitAtlas(&atlas);
         }
     }
-
-
 
     return 0;
 }

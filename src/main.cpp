@@ -79,6 +79,7 @@ typedef struct {
     std::vector<png_color*> palettes;   // SFF v1
     std::map<int, int> palette_usage;
     std::map<int, int> format_usage;
+    size_t numLinkedSprites;
 } Sff;
 
 typedef struct {
@@ -249,6 +250,23 @@ void saveSffPalette(uint32_t* palette, const char* filename) {
         fwrite(&r, 1, 1, file);
         fwrite(&g, 1, 1, file);
         fwrite(&b, 1, 1, file);
+    }
+    fclose(file);
+}
+
+// Save SFF v2 (format) Palette in TXT format
+void saveSffPalette_txt(uint32_t* palette, const char* filename) {
+    FILE* file = fopen(filename, "w");
+    if (!file) {
+        fprintf(stderr, "Error creating file %s\n", filename);
+        return;
+    }
+    fprintf(file, "ID:\tR\tG\tB\n");
+    for (int i = 0; i < 256; i++) {
+        uint8_t r = (palette[i] >> 0) & 0xFF;
+        uint8_t g = (palette[i] >> 8) & 0xFF;
+        uint8_t b = (palette[i] >> 16) & 0xFF;
+        fprintf(file, "%d:\t%d\t%d\t%d\n", i, r, g, b);
     }
     fclose(file);
 }
@@ -1247,9 +1265,9 @@ void save_png(Sprite* s, FILE* file, uint32_t data_size, Sff* sff, bool with_pal
         return;
     }
     // Copy the PNG data from the input file to the output file
-    if (with_palette)
+    if (with_palette) {
         copy_png_with_palette(file, pngFile, sff->palList.palettes[s->palidx]);
-    else
+    } else
         copy_png(file, pngFile, data_size);
     fclose(pngFile);
     // printf("%s\n", pngFilename);
@@ -1296,6 +1314,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                 free(srcPx);
                 return -1;
             }
+            sff->palette_usage[s->palidx]++;
         }
 
         char pngFilename[256];
@@ -1381,23 +1400,25 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                 fseek(file, offset + 4, SEEK_SET); // Restore file offset
                 save_png(s, file, datasize, sff, true);
                 s->data = px;
+                sff->palette_usage[s->palidx]++;
             } else {
                 fprintf(stderr, "Error decoding PNG10 sprite data\n");
                 return -1;
             }
             break;
-
         case 11:
-            printf("PNG11: palidx=%d\n", s->palidx);
+            // printf("PNG11: palidx=%d\n", s->palidx);
             save_png(s, file, datasize, sff, false);
+            sff->palette_usage[-1]++;
             break;
         case 12:
-            printf("PNG12: palidx=%d\n", s->palidx);
+            // printf("PNG12: palidx=%d\n", s->palidx);
             save_png(s, file, datasize, sff, false);
+            sff->palette_usage[-1]++;
             break;
         }
     }
-    sff->palette_usage[s->palidx]++;
+    
     return 0;
 }
 
@@ -1492,6 +1513,7 @@ int extractSff(Sff* sff, const char* filename) {
     // Allocate memory for sprites
     sff->sprites = (Sprite**) malloc(sff->header.NumberOfSprites * sizeof(Sprite*));
     Sprite* prev = NULL;
+    sff->numLinkedSprites = 0;
     long shofs = sff->header.FirstSpriteHeaderOffset;
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
         uint32_t xofs, size;
@@ -1511,9 +1533,11 @@ int extractSff(Sff* sff, const char* filename) {
                 return -1;
             }
             // printf("readSpriteHeaderV2(%d: %d,%d) xofs=%d size=%d lofs=%d tofs=%d indexOfPrevious=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, xofs, size, lofs, tofs, indexOfPrevious);
+            // printf("readSpriteHeaderV2(%d: %d,%d) palidx=%d size=%d indexOfPrevious=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->palidx, size, indexOfPrevious);
             break;
         }
         if (size == 0) {
+            sff->numLinkedSprites++;
             if (indexOfPrevious < i) {
                 Sprite* dst = sff->sprites[i];
                 Sprite* src = sff->sprites[indexOfPrevious];
@@ -1777,7 +1801,7 @@ void printSff(Sff* sff) {
     // Print SFF information
     printf("SFF file: %s\n", sff->filename);
     printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
-    printf("Number of sprites: %d\n", sff->header.NumberOfSprites);
+    printf("Number of sprites: %d (Normal=%d Linked=%d)\n", sff->header.NumberOfSprites, sff->header.NumberOfSprites - sff->numLinkedSprites, sff->numLinkedSprites);
     printf("Number of palettes: %d\n", sff->header.NumberOfPalettes);
     // printf("First Sprite Header Offset: %u\n", sff->header.FirstSpriteHeaderOffset);
 
@@ -1788,20 +1812,29 @@ void printSff(Sff* sff) {
         if (sff->header.Ver0 == 1) {
             hash = fast_hash_v1(sff->palettes[sff->sprites[pair.first]->palidx], 256);
         } else {
-            hash = fast_hash_v2(sff->palList.palettes[sff->sprites[pair.first]->palidx], 256);
+            if (pair.first == -1) {
+                hash = 0;
+            } else {
+                // char outFilename[256];
+                // char basename[256];
+                // get_basename_no_ext(sff->filename, basename, sizeof(basename));
+                // snprintf(outFilename, sizeof(outFilename), "%s_pal_%d.txt", basename, pair.first);
+                // saveSffPalette_txt(sff->palList.palettes[pair.first], outFilename);
+                hash = fast_hash_v2(sff->palList.palettes[pair.first], 256);
+            }
         }
-        std::cout << pair.first << ": " << pair.second << "\t" << hash << '\n';
+        std::cout << "\t" << pair.first << ":\t" << pair.second << "\t" << hash << '\n';
     }
 
     printf("\nFormat usage:\n");
     for (const auto& pair : sff->format_usage) {
-        std::cout << format_code[pair.first] << ": " << pair.second << '\n';
+        std::cout << "\t" << format_code[pair.first] << ": " << pair.second << '\n';
     }
 
     // for (int i = 0; i < sff->header.NumberOfSprites; i++) {
     //     printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
     // }
-    printf("==========================================\n\n");
+    printf("____________________________________________________\n\n");
 }
 
 int main(int argc, char* argv[]) {

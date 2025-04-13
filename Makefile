@@ -17,4 +17,4 @@ src/libpng/libpng.a:
 	@make --no-print-directory -s -C src/libpng -f scripts/makefile.gcc libpng.a
 
 clean:
-	@rm sffcli.exe sffcli_debug.exe go_sffcli.exe src/libpng/libpng.a
+	@rm sffcli.exe sffcli_debug.exe go_sffcli.exe src/libpng/*.a src/libpng/*.o

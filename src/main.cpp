@@ -1,9 +1,9 @@
 /*
-RELEASE BUILD:
-g++ -O3 -DNDEBUG -o sffcli.exe src/main.cpp -lpng -lz
+SFF CLI tool to extract sprites (into PNG format) and palettes (into ACT format) from SFF files
+13 April 2025, leonkasovan@gmail.com
 
-DEBUG BUILD:
-g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp -lpng -lz
+RELEASE BUILD: make cxx_release
+DEBUG BUILD: make cxx_debug
 */
 
 #include <stdio.h>
@@ -17,6 +17,7 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
 #include <array>
 #include <vector>
 #include <filesystem>
+#include <iostream>
 #include "png.h"
 #define STB_RECT_PACK_IMPLEMENTATION
 #include "stb_rect_pack.h"
@@ -28,6 +29,7 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
     #define STAT_STRUCT struct _stat
     #define STAT_FUNC _stat
     #define S_ISDIR(mode) (((mode) & _S_IFDIR) != 0)
+    #define SEP "\\"
 #else
     #include <sys/types.h>
     #include <sys/stat.h>
@@ -35,6 +37,7 @@ g++ -DDEBUG -fsanitize=address -static-libasan -g -o sffcli_dbg.exe src/main.cpp
     #define MKDIR(dir) mkdir(dir, 0755)
     #define STAT_STRUCT struct stat
     #define STAT_FUNC stat
+    #define SEP "/"
 #endif
 
 #define MAX_PAL_NO 256
@@ -72,10 +75,11 @@ typedef struct {
 typedef struct {
     SffHeader header;
     Sprite** sprites;
-    PaletteList palList;
     char filename[256];
-    // std::vector<std::array<png_color, 256>> palettes;
-    std::vector<png_color*> palettes;
+    PaletteList palList;    // SFF v2
+    std::vector<png_color*> palettes;   // SFF v1
+    std::map<int, int> palette_usage;
+    std::map<int, int> format_usage;
 } Sff;
 
 typedef struct {
@@ -202,8 +206,28 @@ int check_png_signature(FILE *in) {
     return memcmp(sig, expected_sig, PNG_SIG_BYTES) == 0;
 }
 
-// Fast hash function for a 256-element array of uint32_t
-uint32_t fast_hash(const uint32_t* data, size_t len) {
+// Convert PNG Palette format into SFF v2 Palette
+uint32_t* png_to_sff_palette(png_color* pngPal, uint32_t* sffPal, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        sffPal[i] = pngPal[i].red | pngPal[i].blue << 8 | pngPal[i].green << 16 | (i?0:255) << 24;
+    }
+    return sffPal;
+}
+
+// Fast hash function for a 256-element array of png_color (PNG Palette)
+uint32_t fast_hash_v1(png_color* pngPal, size_t len) {
+    uint32_t h = len * PRIME;
+    uint32_t data;
+    for (size_t i = 0; i < len; ++i) {
+        data = pngPal[i].red | pngPal[i].blue << 8 | pngPal[i].green << 16 | (i?0:255) << 24;
+        h = ((h + data) << 13) | ((h + data) >> (32 - 13)); // Rotate bits
+        h *= PRIME;
+    }
+    return h;
+}
+
+// Fast hash function for a 256-element array of uint32_t (SFF v2 Palette)
+uint32_t fast_hash_v2(const uint32_t* data, size_t len) {
     uint32_t h = len * PRIME;
     for (size_t i = 0; i < len; ++i) {
         h = ((h + data[i]) << 13) | ((h + data[i]) >> (32 - 13)); // Rotate bits
@@ -212,7 +236,8 @@ uint32_t fast_hash(const uint32_t* data, size_t len) {
     return h;
 }
 
-void savePalette(uint32_t* palette, const char* filename) {
+// Save SFF v2 (format) Palette in ACT format
+void saveSffPalette(uint32_t* palette, const char* filename) {
     FILE* file = fopen(filename, "wb");
     if (!file) {
         fprintf(stderr, "Error creating file %s\n", filename);
@@ -322,13 +347,6 @@ int readSffHeader(Sff* sff, FILE* file, uint32_t* lofs, uint32_t* tofs) {
         fprintf(stderr, "Unsupported SFF version: %d\n", sff->header.Ver0);
         return -1;
     }
-
-    // Print header information
-    printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
-    printf("First Sprite Header Offset: %u\n", sff->header.FirstSpriteHeaderOffset);
-    printf("First Palette Header Offset: %u\n", sff->header.FirstPaletteHeaderOffset);
-    printf("Number of Sprites: %u\n", sff->header.NumberOfSprites);
-    printf("Number of Palettes: %u\n", sff->header.NumberOfPalettes);
 
     return 0;
 }
@@ -845,11 +863,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     if (createDirectory(basename) != 0) {
         return -1;
     }
-#ifdef _WIN32
-    snprintf(pngFilename, sizeof(pngFilename), "%s\\%s %d %d.png", basename, basename, s->Group, s->Number);
-#else
-    snprintf(pngFilename, sizeof(pngFilename), "%s/%s %d %d.png", basename, basename, s->Group, s->Number);
-#endif
+    snprintf(pngFilename, sizeof(pngFilename), "%s%s%s %d %d.png", basename, SEP, basename, s->Group, s->Number);
     size_t srcLen = datasize - (128 + palSize);
     uint8_t* srcPx = (uint8_t*) malloc(srcLen);
     if (!srcPx) {
@@ -862,6 +876,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     }
 
     s->data = NULL;
+    sff->format_usage[1]++;
     // printf("PCX: ps=%d ", ps);
     if (paletteSame) {
         png_color* png_palette;
@@ -897,7 +912,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         }
         // palHash = fast_hash(pal, 256);
         // printf("old_pal=%d ", s->palidx);
-        // save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         s->data = px;
         // free(px);
     } else {
@@ -939,6 +954,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     }
     // printf("[DEBUG] src/main.cpp:%d ps=%d paletteSame=%d palidx=%d palLen=%d palSize=%d srcLen=%ld\n", __LINE__, ps, paletteSame, s->palidx, palettes->size(), palSize, srcLen);
     // printf("%u\n", palHash);
+    sff->palette_usage[s->palidx]++;
     return 0;
 }
 
@@ -1142,10 +1158,11 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
 #endif
 
         s->data = NULL;
+        sff->format_usage[format]++;
         switch (format) {
         case 2:
             // printf("Decoding sprite with RLE8\n");
-            printf("RLE8: ");
+            // printf("RLE8: ");
             px = Rle8Decode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
@@ -1166,7 +1183,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 3:
             // printf("Decoding sprite with RLE5\n");
-            printf("RLE5: ");
+            // printf("RLE5: ");
             px = Rle5Decode(s, srcPx, srcLen);
             free(srcPx);
             if (px) {
@@ -1221,6 +1238,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         }
     }
+    sff->palette_usage[s->palidx]++;
     return 0;
 }
 
@@ -1262,17 +1280,10 @@ int extractSff(Sff* sff, const char* filename) {
 
     if (sff->header.Ver0 != 1) {
         // Allocate memory for palettes
-        // sff->palList.palettes = (uint32_t**) malloc(sff->header.NumberOfPalettes * sizeof(uint32_t*));
         std::map<std::array<int, 2>, int> uniquePals;
         sff->palList.numPalettes = 0;
         for (int i = 0; i < sff->header.NumberOfPalettes && i < MAX_PAL_NO; i++) {
             fseek(file, sff->header.FirstPaletteHeaderOffset + i * 16, SEEK_SET);
-            // sff->palList.palettes[i] = (uint32_t*) malloc(256 * sizeof(uint32_t));
-            // if (!sff->palList.palettes[i]) {
-            //     fprintf(stderr, "Error allocating memory for palette %d\n", i);
-            //     fclose(file);
-            //     return -1;
-            // }
             int16_t gn[3];
             if (fread(gn, sizeof(uint16_t), 3, file) != 3) {
                 fprintf(stderr, "Error reading palette group\n");
@@ -1315,8 +1326,6 @@ int extractSff(Sff* sff, const char* filename) {
                 sff->palList.numPalettes++;
             } else {
                 // If the palette is not unique, use the existing one
-                // sff->palList.palettes[i] = sff->palList.palettes[uniquePals[key]];
-                // sff->palList.paletteMap[i] = sff->palList.paletteMap[uniquePals[key]];
                 printf("Palette %d(%d,%d) is not unique, using palette %d\nIncomplete code\n", i, gn[0], gn[1], uniquePals[key]);
             }
         }
@@ -1351,7 +1360,7 @@ int extractSff(Sff* sff, const char* filename) {
                 Sprite* dst = sff->sprites[i];
                 Sprite* src = sff->sprites[indexOfPrevious];
                 spriteCopy(dst, src);
-                printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
+                // printf("Info: Sprite[%d] use prev Sprite[%d]\n", i, indexOfPrevious);
             } else {
                 printf("Warning: Sprite %d has no size\n", i);
                 sff->sprites[i]->palidx = 0;
@@ -1362,7 +1371,6 @@ int extractSff(Sff* sff, const char* filename) {
                 if (sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0) {
                     character = false;
                 }
-                // printf("Info: Sprite[%d] (%d,%d) offset=%d size=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, shofs + 32, size);
                 // printf("Sprite[%d] (%d,%d) ", i, sff->sprites[i]->Group, sff->sprites[i]->Number);
                 if (readSpriteDataV1(sff->sprites[i], file, sff, shofs + 32, size, xofs, prev, &sff->palettes, character) != 0) {
                     fclose(file);
@@ -1387,7 +1395,6 @@ int extractSff(Sff* sff, const char* filename) {
                 prev = sff->sprites[i];
             }
         }
-        // Prepare atlas data: dimension, offset, rects coords, etc.
 
         if (sff->header.Ver0 == 1) {
             shofs = xofs;
@@ -1408,7 +1415,7 @@ int initAtlas(Atlas *atlas, Sff *sff) {
     atlas->sff = sff;
     atlas->rects = (struct stbrp_rect*) malloc(sff->header.NumberOfSprites * sizeof(struct stbrp_rect));
     memset(atlas->rects, 0, sff->header.NumberOfSprites * sizeof(struct stbrp_rect));
-    printf("\ninitAtlas\n");
+    // printf("\ninitAtlas\n");
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
         size_t x, y;
         int16_t sprite_width = sff->sprites[i]->Size[0];
@@ -1416,7 +1423,7 @@ int initAtlas(Atlas *atlas, Sff *sff) {
         uint8_t* p = sff->sprites[i]->data;
 
         if (!p) {
-            printf("Warning: sprite %d has no data\n", i);
+            // printf("Info: linked sprite[%d]\n", i);
             continue;
         }
 
@@ -1460,7 +1467,7 @@ int initAtlas(Atlas *atlas, Sff *sff) {
         atlas->rects[i].w = sprite_width;
         atlas->rects[i].h = sprite_height;
 
-        printf("Sprite %d[%d,%d]: %dx%d -> %dx%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number,sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sprite_width, sprite_height);
+        // printf("Sprite %d[%d,%d]: %dx%d -> %dx%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number,sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sprite_width, sprite_height);
     }
 
     /* calculate an optimal atlas size */
@@ -1475,71 +1482,6 @@ int initAtlas(Atlas *atlas, Sff *sff) {
     return 0;
 }
 
-int atlasSave(uint8_t *p, int w, int h, const char *fn, const char *meta) {
-    FILE *f;
-    uint32_t *ptr = (uint32_t*)p, pal[256];
-    uint8_t *data, *pal2 = (uint8_t*)&pal;
-    png_color pngpal[256];
-    png_byte pngtrn[256];
-    png_structp png_ptr;
-    png_infop info_ptr;
-    png_bytep *rows;
-    png_text texts[1] = { 0 };
-    int i, j, nc = 0;
-
-    if(!p || !fn || !*fn || w < 1 || h < 1) return 0;
-    printf("Saving %s\r\n", fn);
-    f = fopen(fn, "wb+");
-    if(!f) { fprintf(stderr,"Unable to write %s\r\n", fn); exit(2); }
-    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if(!png_ptr) { fclose(f); return 0; }
-    info_ptr = png_create_info_struct(png_ptr);
-    if(!info_ptr) { png_destroy_write_struct(&png_ptr, NULL); fclose(f); return 0; }
-    if(setjmp(png_jmpbuf(png_ptr))) { png_destroy_write_struct(&png_ptr, &info_ptr); fclose(f); return 0; }
-    png_init_io(png_ptr, f);
-    png_set_compression_level(png_ptr, 9);
-    png_set_compression_strategy(png_ptr, 0);
-    png_set_filter(png_ptr, PNG_FILTER_TYPE_BASE, PNG_FILTER_VALUE_SUB);
-    rows = (png_bytep*)malloc(h * sizeof(png_bytep));
-    data = (uint8_t*)malloc(w * h);
-    if(!rows || !data) { fprintf(stderr,"Not enough memory\r\n"); exit(1); }
-    /* lets see if we can save this as an indexed image */
-    for(i = 0; i < w * h; i++) {
-        for(j = 0; j < nc && pal[j] != ptr[i]; j++);
-        if(j >= nc) {
-            if(nc == 256) { nc = -1; break; }
-            pal[nc++] = ptr[i];
-        }
-        data[i] = j;
-    }
-    if(nc != -1) {
-        for(i = j = 0; i < nc; i++) {
-            pngpal[i].red = pal2[i * 4 + 0];
-            pngpal[i].green = pal2[i * 4 + 1];
-            pngpal[i].blue = pal2[i * 4 + 2];
-            pngtrn[i] = pal2[i * 4 + 3];
-        }
-        png_set_PLTE(png_ptr, info_ptr, pngpal, nc);
-        png_set_tRNS(png_ptr, info_ptr, pngtrn, nc, NULL);
-        for(i = 0; i < h; i++) rows[i] = data + i * w;
-    } else
-        for(i = 0; i < h; i++) rows[i] = p + i * w * 4;
-    png_set_IHDR(png_ptr, info_ptr, w, h, 8, nc == -1 ? PNG_COLOR_TYPE_RGB_ALPHA : PNG_COLOR_TYPE_PALETTE,
-        PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-    if(meta && *meta) {
-        texts[0].key = (png_charp)"Comment"; texts[0].text = (png_charp)meta;
-        png_set_text(png_ptr, info_ptr, texts, 1);
-    }
-    png_write_info(png_ptr, info_ptr);
-    png_write_image(png_ptr, rows);
-    png_write_end(png_ptr, info_ptr);
-    png_destroy_write_struct(&png_ptr, &info_ptr);
-    free(rows);
-    free(data);
-    fclose(f);
-    return 1;
-}
-
 int generateAtlas(Atlas *atlas) {
     int crop = 1, tofile = 1;
     uint8_t *o, *p, *src, *dst;
@@ -1552,7 +1494,7 @@ int generateAtlas(Atlas *atlas) {
     if(!nodes) { fprintf(stderr,"Not enough memory\n"); exit(1); }
     memset(nodes, 0, (atlas->width + 1) * sizeof(stbrp_node));
     stbrp_init_target(&ctx, atlas->width, atlas->height, nodes, atlas->width + 1);
-    printf("Packing %u sprites into %u x %u atlas\n", num, atlas->width, atlas->height);
+    // printf("Packing %u sprites into %u x %u atlas\n", num, atlas->width, atlas->height);
     if(!stbrp_pack_rects(&ctx, atlas->rects, num)) {
         atlas->height <<= 1;
         memset(nodes, 0, (atlas->width + 1) * sizeof(stbrp_node));
@@ -1605,8 +1547,12 @@ ok:
             filename);
     }
     
+    char basename[256];
+    char outFilename[256];
+    get_basename_no_ext(atlas->sff->filename, basename, sizeof(basename));
+    snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s.png", basename);
     if (atlas->sff->header.Ver0 == 1) {
-        save_as_png("sprite_atlas.png", atlas->width, atlas->height, o, atlas->sff->palettes[atlas->sff->sprites[0]->palidx]);
+        save_as_png(outFilename, atlas->width, atlas->height, o, atlas->sff->palettes[atlas->sff->sprites[0]->palidx]);
     } else {
         uint32_t* sff_palette = atlas->sff->palList.palettes[atlas->sff->sprites[0]->palidx];
         png_color png_palette[256];
@@ -1615,12 +1561,13 @@ ok:
             png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
             png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
         }
-        save_as_png("sprite_atlas.png", atlas->width, atlas->height, o, png_palette);
+        save_as_png(outFilename, atlas->width, atlas->height, o, png_palette);
     }
     free(o);
     /* save meta info to a separate file too */
     if(tofile) {
-        FILE* f = fopen("sprite_atlas.txt", "wb+");
+        snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s.txt", basename);
+        FILE* f = fopen(outFilename, "wb+");
         if(f) {
             fwrite(meta, 1, s - meta, f);
             fclose(f);
@@ -1658,12 +1605,33 @@ void printAtlas(Atlas* atlas) {
 }
 
 void printSff(Sff* sff) {
+    // Print SFF information
     printf("SFF file: %s\n", sff->filename);
+    printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
     printf("Number of sprites: %d\n", sff->header.NumberOfSprites);
     printf("Number of palettes: %d\n", sff->header.NumberOfPalettes);
-    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
-        printf("Sprite %d: Group %d, Number %d, Size %dx%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1]);
+    // printf("First Sprite Header Offset: %u\n", sff->header.FirstSpriteHeaderOffset);
+
+    printf("\nPalette usage:\n");
+    for (const auto& pair : sff->palette_usage) {
+        uint32_t hash;
+
+        if (sff->header.Ver0 == 1) {
+            hash = fast_hash_v1(sff->palettes[sff->sprites[pair.first]->palidx], 256);
+        } else {
+            hash = fast_hash_v2(sff->palList.palettes[sff->sprites[pair.first]->palidx], 256);
+        }
+        std::cout << pair.first << ": " << pair.second << "\t" << hash << '\n';
     }
+
+    printf("\nFormat usage:\n");
+    for (const auto& pair : sff->format_usage) {
+        std::cout << pair.first << ": " << pair.second << '\n';
+    }
+    
+    // for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+    //     printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
+    // }
 }
 
 int main(int argc, char* argv[]) {
@@ -1675,21 +1643,28 @@ int main(int argc, char* argv[]) {
         for (const auto& entry : std::filesystem::directory_iterator(".")) {
             if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
                 extractSff(&sff, entry.path().string().c_str());
+                initAtlas(&atlas, &sff);
+                printSff(&sff);
+                // printAtlas(&atlas);
+                generateAtlas(&atlas);
+                freeSff(&sff);
+                deinitAtlas(&atlas);
             }
         }
     } else {
         // iterate all arguments
         for (int i = 1; i < argc; i++) {
             extractSff(&sff, argv[i]);
+            initAtlas(&atlas, &sff);
+            printSff(&sff);
+            // printAtlas(&atlas);
+            generateAtlas(&atlas);
+            freeSff(&sff);
+            deinitAtlas(&atlas);
         }
     }
 
-    initAtlas(&atlas, &sff);
-    // printSff(&sff);
-    // printAtlas(&atlas);
-    generateAtlas(&atlas);
-    freeSff(&sff);
-    deinitAtlas(&atlas);
+    
     
     return 0;
 }

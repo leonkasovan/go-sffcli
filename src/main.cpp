@@ -1729,6 +1729,7 @@ ok:
     memset(o, 0, atlas->width * atlas->height);
 
     /* records */
+    s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\tFilename\n");
     char filename[256];
     for (i = 0; i < num; i++) {
         snprintf(filename, sizeof(filename), "%d_%d.png", atlas->sff->sprites[i]->Group, atlas->sff->sprites[i]->Number);
@@ -1738,7 +1739,7 @@ ok:
             for (j = 0; j < atlas->rects[i].h; j++, dst += atlas->width, src += atlas->sff->sprites[i]->Size[0])
                 memcpy(dst, src, atlas->rects[i].w);
         }
-        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%s\r\n",
+        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%s\n",
             atlas->rects[i].x, atlas->rects[i].y, atlas->rects[i].w, atlas->rects[i].h,
             atlas->sff->sprites[i]->atlas_x, atlas->sff->sprites[i]->atlas_y, atlas->sff->sprites[i]->Size[0], atlas->sff->sprites[i]->Size[1],
             filename);

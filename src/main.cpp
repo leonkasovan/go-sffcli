@@ -100,6 +100,7 @@ Sprite* newSprite() {
 // Global variables for command line arguments
 bool opt_extract = false;
 bool opt_verbose = false;
+int opt_palidx = 0;
 
 int createDirectory(const char* name) {
     STAT_STRUCT st;
@@ -1544,6 +1545,7 @@ int extractSff(Sff* sff, const char* filename) {
             // printf("readSpriteHeaderV2(%d: %d,%d) palidx=%d size=%d indexOfPrevious=%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->palidx, size, indexOfPrevious);
             break;
         }
+
         if (size == 0) {
             sff->numLinkedSprites++;
             if (indexOfPrevious < i) {
@@ -1589,6 +1591,11 @@ int extractSff(Sff* sff, const char* filename) {
             shofs = xofs;
         } else {
             shofs += 28;
+        }
+        
+        // Set default opt_palidx for sprite with Group 0 and Number 0
+        if (sff->sprites[i]->Group == 0 && sff->sprites[i]->Number == 0 && opt_palidx == 0) {
+            opt_palidx = sff->sprites[i]->palidx;
         }
     }
     fclose(file);
@@ -1729,7 +1736,7 @@ ok:
     memset(o, 0, atlas->width * atlas->height);
 
     /* records */
-    s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\tFilename\n");
+    s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\txx\tyy\tFilename\n");
     char filename[256];
     for (i = 0; i < num; i++) {
         snprintf(filename, sizeof(filename), "%d_%d.png", atlas->sff->sprites[i]->Group, atlas->sff->sprites[i]->Number);
@@ -1739,16 +1746,17 @@ ok:
             for (j = 0; j < atlas->rects[i].h; j++, dst += atlas->width, src += atlas->sff->sprites[i]->Size[0])
                 memcpy(dst, src, atlas->rects[i].w);
         }
-        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%s\n",
+        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%s\n",
             atlas->rects[i].x, atlas->rects[i].y, atlas->rects[i].w, atlas->rects[i].h,
             atlas->sff->sprites[i]->atlas_x, atlas->sff->sprites[i]->atlas_y, atlas->sff->sprites[i]->Size[0], atlas->sff->sprites[i]->Size[1],
+            atlas->sff->sprites[i]->Offset[0], atlas->sff->sprites[i]->Offset[1],
             filename);
     }
 
     char basename[256];
     char outFilename[256];
     get_basename_no_ext(atlas->sff->filename, basename, sizeof(basename));
-    snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s.png", basename);
+    snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s_p%d.png", basename, opt_palidx);
     if (atlas->sff->header.Ver0 == 1) {
         save_as_png(outFilename, atlas->width, atlas->height, o, atlas->sff->palettes[atlas->usePalette<0 ? 0 : atlas->usePalette]);
     } else {
@@ -1762,9 +1770,11 @@ ok:
         save_as_png(outFilename, atlas->width, atlas->height, o, png_palette);
     }
     free(o);
+    printf("\nAtlas %s (%ux%u) created with palette_index=%d\n", outFilename, atlas->width, atlas->height, opt_palidx);
+    printf("___________________________________________________________\n\n");
     /* save meta info to a separate file too */
     if (tofile) {
-        snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s.txt", basename);
+        snprintf(outFilename, sizeof(outFilename), "sprite_atlas_%s_p%d.txt", basename, opt_palidx);
         FILE* f = fopen(outFilename, "wb+");
         if (f) {
             fwrite(meta, 1, s - meta, f);
@@ -1816,7 +1826,7 @@ void printSff(Sff* sff) {
     };
 
     // Print SFF information
-    printf("SFF file: %s\n", sff->filename);
+    printf("\nSFF file: %s\n", sff->filename);
     printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
     printf("Number of sprites: %d (Normal=%d Linked=%d)\n", sff->header.NumberOfSprites, sff->header.NumberOfSprites - sff->numLinkedSprites, sff->numLinkedSprites);
     printf("Number of palettes: %d\n", sff->header.NumberOfPalettes);
@@ -1858,14 +1868,12 @@ void printSff(Sff* sff) {
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
         printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
     }
-    printf("____________________________________________________\n\n");
 }
 
 int main(int argc, char* argv[]) {
     Atlas atlas;
     Sff sff;
     int opt;
-    const char *palidx = "0";
 
     while ((opt = getopt(argc, argv, "hxvp:")) != -1) {
         switch (opt) {
@@ -1879,7 +1887,7 @@ int main(int argc, char* argv[]) {
                 opt_verbose = true;
                 break;
             case 'p':
-                palidx = optarg;
+                opt_palidx = atoi(optarg);
                 break;
             default:
                 printf("Usage: %s -x -h -v [-p palette_index]\n", argv[0]);
@@ -1893,7 +1901,7 @@ int main(int argc, char* argv[]) {
         for (const auto& entry : std::filesystem::directory_iterator(".")) {
             if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
                 extractSff(&sff, entry.path().string().c_str());
-                initAtlas(&atlas, &sff, atoi(palidx));
+                initAtlas(&atlas, &sff, opt_palidx);
                 printSff(&sff);
                 // printAtlas(&atlas);
                 generateAtlas(&atlas);
@@ -1905,7 +1913,7 @@ int main(int argc, char* argv[]) {
         // iterate all arguments
         for (int i = optind; i < argc; i++) {
             extractSff(&sff, argv[i]);
-            initAtlas(&atlas, &sff, atoi(palidx));
+            initAtlas(&atlas, &sff, opt_palidx);
             printSff(&sff);
             // printAtlas(&atlas);
             generateAtlas(&atlas);

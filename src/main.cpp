@@ -18,6 +18,7 @@ DEBUG BUILD: make cxx_debug
 #include <vector>
 #include <filesystem>
 #include <iostream>
+#include <algorithm>
 #include "png.h"
 #define STB_RECT_PACK_IMPLEMENTATION
 #include "stb_rect_pack.h"
@@ -95,6 +96,10 @@ Sprite* newSprite() {
     sprite->palidx = -1;
     return sprite;
 }
+
+// Global variables for command line arguments
+bool opt_extract = false;
+bool opt_verbose = false;
 
 int createDirectory(const char* name) {
     STAT_STRUCT st;
@@ -1038,6 +1043,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
     char pngFilename[256];
     char basename[256];
     get_basename_no_ext(sff->filename, basename, sizeof(basename));
+    if (opt_extract)
     if (createDirectory(basename) != 0) {
         return -1;
     }
@@ -1090,7 +1096,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         }
         // palHash = fast_hash(pal, 256);
         // printf("old_pal=%d ", s->palidx);
-        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        if (opt_extract) save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         s->data = px;
         // free(px);
     } else {
@@ -1126,7 +1132,7 @@ int readSpriteDataV1(Sprite* s, FILE* file, Sff* sff, uint64_t offset, uint32_t 
         // printf("[DEBUG] src/main.cpp:%d\n", __LINE__);
         // palHash = fast_hash(pal, 256);
         // printf("new_pal=%d ", s->palidx);
-        save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+        if (opt_extract) save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
         s->data = px;
         // free(px);
     }
@@ -1321,6 +1327,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
         char pngFilename[256];
         char basename[256];
         get_basename_no_ext(sff->filename, basename, sizeof(basename));
+        if (opt_extract) 
         if (createDirectory(basename) != 0) {
             return -1;
         }
@@ -1342,7 +1349,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                if (opt_extract) save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 s->data = px;
                 // free(px);
             } else {
@@ -1363,7 +1370,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                if (opt_extract) save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 s->data = px;
                 // free(px);
             } else {
@@ -1385,7 +1392,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
                     png_palette[i].green = (sff_palette[i] >> 8) & 0xFF;
                     png_palette[i].blue = (sff_palette[i] >> 16) & 0xFF;
                 }
-                save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
+                if (opt_extract) save_as_png(pngFilename, s->Size[0], s->Size[1], px, png_palette);
                 s->data = px;
                 // free(px);
             } else {
@@ -1399,7 +1406,7 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             px = Indexed_PngDecode(s, file);
             if (px) {
                 fseek(file, offset + 4, SEEK_SET); // Restore file offset
-                save_png(s, file, datasize, sff, true);
+                if (opt_extract) save_png(s, file, datasize, sff, true);
                 s->data = px;
                 sff->palette_usage[s->palidx]++;
             } else {
@@ -1409,12 +1416,12 @@ int readSpriteDataV2(Sprite* s, FILE* file, uint64_t offset, uint32_t datasize, 
             break;
         case 11:
             // printf("PNG11: palidx=%d\n", s->palidx);
-            save_png(s, file, datasize, sff, false);
+            if (opt_extract) save_png(s, file, datasize, sff, false);
             sff->palette_usage[-1]++;
             break;
         case 12:
             // printf("PNG12: palidx=%d\n", s->palidx);
-            save_png(s, file, datasize, sff, false);
+            if (opt_extract) save_png(s, file, datasize, sff, false);
             sff->palette_usage[-1]++;
             break;
         }
@@ -1812,27 +1819,33 @@ void printSff(Sff* sff) {
     printf("Version: %d.%d.%d.%d\n", sff->header.Ver0, sff->header.Ver1, sff->header.Ver2, sff->header.Ver3);
     printf("Number of sprites: %d (Normal=%d Linked=%d)\n", sff->header.NumberOfSprites, sff->header.NumberOfSprites - sff->numLinkedSprites, sff->numLinkedSprites);
     printf("Number of palettes: %d\n", sff->header.NumberOfPalettes);
-    // printf("First Sprite Header Offset: %u\n", sff->header.FirstSpriteHeaderOffset);
 
-    printf("\nPalette usage:\n");
-    for (const auto& pair : sff->palette_usage) {
-        uint32_t hash;
+    if (opt_verbose) {
+        printf("\nPalette usage:\n");
+        for (const auto& pair : sff->palette_usage) {
+            uint32_t hash;
 
-        if (sff->header.Ver0 == 1) {
-            hash = fast_hash_v1(sff->palettes[sff->sprites[pair.first]->palidx], 256);
-        } else {
-            if (pair.first == -1) {
-                hash = 0;
+            if (sff->header.Ver0 == 1) {
+                hash = fast_hash_v1(sff->palettes[sff->sprites[pair.first]->palidx], 256);
             } else {
-                // char outFilename[256];
-                // char basename[256];
-                // get_basename_no_ext(sff->filename, basename, sizeof(basename));
-                // snprintf(outFilename, sizeof(outFilename), "%s_pal_%d.txt", basename, pair.first);
-                // saveSffPalette_txt(sff->palList.palettes[pair.first], outFilename);
-                hash = fast_hash_v2(sff->palList.palettes[pair.first], 256);
+                if (pair.first == -1) {
+                    hash = 0;
+                } else {
+                    hash = fast_hash_v2(sff->palList.palettes[pair.first], 256);
+                }
             }
+            std::cout << "\t" << pair.first << ":\t" << pair.second << "\t" << hash << '\n';
         }
-        std::cout << "\t" << pair.first << ":\t" << pair.second << "\t" << hash << '\n';
+    } else {
+        std::vector<std::pair<int, int>> sortedVec(sff->palette_usage.begin(), sff->palette_usage.end());
+        std::sort(sortedVec.begin(), sortedVec.end(),
+              [](const auto& a, const auto& b) {
+                  return a.second > b.second;
+              });
+        printf("\nTop palette usage:\n");
+        for (int i = 0; i < 10 && i < sortedVec.size() ; ++i) {
+            std::cout << "\t" << sortedVec[i].first << "\t:\t" << sortedVec[i].second << '\n';
+        }
     }
 
     printf("\nFormat usage:\n");
@@ -1840,6 +1853,7 @@ void printSff(Sff* sff) {
         std::cout << "\t" << format_code[pair.first] << ": " << pair.second << '\n';
     }
 
+    if (opt_verbose)
     for (int i = 0; i < sff->header.NumberOfSprites; i++) {
         printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
     }
@@ -1849,14 +1863,36 @@ void printSff(Sff* sff) {
 int main(int argc, char* argv[]) {
     Atlas atlas;
     Sff sff;
-    int palidx = 0;
+    int opt;
+    const char *palidx = "0";
 
-    if (argc < 2) {
+    while ((opt = getopt(argc, argv, "hxvp:")) != -1) {
+        switch (opt) {
+            case 'h':
+                printf("Usage: %s -x -h -v [-p palette_index]\n", argv[0]);
+                return 0;
+            case 'x':
+                opt_extract = true;
+                break;
+            case 'v':
+                opt_verbose = true;
+                break;
+            case 'p':
+                palidx = optarg;
+                break;
+            default:
+                printf("Usage: %s -x -h -v [-p palette_index]\n", argv[0]);
+                return 1;
+        }
+    }
+
+    // Check the rest of the arguments
+    if ( optind >= argc) { // There is no arguments, so we will use the current directory
         // iterate current directory with sff file
         for (const auto& entry : std::filesystem::directory_iterator(".")) {
             if (strcasecmp(entry.path().extension().string().c_str(), ".sff") == 0) {
                 extractSff(&sff, entry.path().string().c_str());
-                initAtlas(&atlas, &sff, palidx);
+                initAtlas(&atlas, &sff, atoi(palidx));
                 printSff(&sff);
                 // printAtlas(&atlas);
                 generateAtlas(&atlas);
@@ -1864,11 +1900,11 @@ int main(int argc, char* argv[]) {
                 deinitAtlas(&atlas);
             }
         }
-    } else {
+    } else { // There are arguments, so we will use the arguments
         // iterate all arguments
-        for (int i = 1; i < argc; i++) {
+        for (int i = optind; i < argc; i++) {
             extractSff(&sff, argv[i]);
-            initAtlas(&atlas, &sff, palidx);
+            initAtlas(&atlas, &sff, atoi(palidx));
             printSff(&sff);
             // printAtlas(&atlas);
             generateAtlas(&atlas);

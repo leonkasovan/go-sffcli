@@ -6,12 +6,16 @@ SFF v2 supports rle5, rle8, lz5, png.
 ## Usage
 ```
 sffcli
-sffcli -pal
-sffcli -pal [char1.sff] [char2.sff] ...
+sffcli [char1.sff] [char2.sff] ...
 
-When called with no args it will read all sff files in current directory
+When called with no args it will read all sff files in current directory and create sprite atlas and its info.
+
 Options:
-  -pal : save palettes 
+  -x        : extract each sprite to PNG format
+  -p palidx : create atlas from sprite that palette index matched with palidx
+  -v        : verbose
+  -a        : save all palettes in ACT format (not yet)
+  -t        : save all palettes in TXT format (not yet)
 ```
 
 ## Output

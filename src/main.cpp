@@ -1741,7 +1741,7 @@ ok:
     memset(o, 0, atlas->width * atlas->height);
 
     /* records */
-    s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\txx\tyy\tFilename\n");
+    // s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\txx\tyy\tFilename\n");
     char filename[256];
     size_t numProcessedSprite = 0;
     for (i = 0; i < num; i++) {
@@ -1876,20 +1876,20 @@ void printSff(Sff* sff) {
         char basename[256];
         char outFilename[256];
         get_basename_no_ext(sff->filename, basename, sizeof(basename));
-        snprintf(outFilename, sizeof(outFilename), "sff_info_%s.csv", basename);
+        snprintf(outFilename, sizeof(outFilename), "SFFv%d_Info_%s.csv", sff->header.Ver0, basename);
         FILE *f = fopen(outFilename, "w");
         if (f) {
-            fprintf(f, "sep=|\n");
+            // fprintf(f, "sep=|\n");
             if (sff->header.Ver0 == 1) {
-                fprintf(f, "No|Group|Number|Width|Height|Off.x|Off.y|Pal.idx\n");
+                fprintf(f, "No,Group,Number,Width,Height,Off.x,Off.y,Palette\n");
             } else {
-                fprintf(f, "No|Group|Number|Width|Height|Off.x|Off.y|Pal.idx|Format|Color\n");
+                fprintf(f, "No,Group,Number,Width,Height,Off.x,Off.y,Palette,Format,ColorDepth\n");
             }
             for (int i = 0; i < sff->header.NumberOfSprites; i++) {
                 if (sff->header.Ver0 == 1) {
-                    fprintf(f, "%d|%u|%u|%d|%d|%d|%d|%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx);
+                    fprintf(f, "%d,%u,%u,%d,%d,%d,%d,%d\n", i+1, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx);
                 } else {
-                    fprintf(f, "%d|%u|%u|%d|%d|%d|%d|%d|%s|%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx, format_code[-sff->sprites[i]->rle].c_str(), sff->sprites[i]->coldepth);
+                    fprintf(f, "%d,%u,%u,%d,%d,%d,%d,%d,%s,%d\n", i+1, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx, format_code[-sff->sprites[i]->rle].c_str(), sff->sprites[i]->coldepth);
                 }
             }
             fclose(f);

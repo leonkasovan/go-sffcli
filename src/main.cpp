@@ -100,6 +100,7 @@ Sprite* newSprite() {
 // Global variables for command line arguments
 bool opt_extract = false;
 bool opt_verbose = false;
+bool opt_sff_info = false;
 int opt_palidx = 0;
 
 int createDirectory(const char* name) {
@@ -1777,7 +1778,7 @@ ok:
         save_as_png(outFilename, atlas->width, atlas->height, o, png_palette);
     }
     free(o);
-    printf("\nAtlas %s (%ux%u) created with %u sprites and palette_index=%d\n", outFilename, atlas->width, atlas->height, numProcessedSprite, opt_palidx);
+    printf("Atlas %s (%ux%u) created with %u sprites and palette_index=%d\n", outFilename, atlas->width, atlas->height, numProcessedSprite, opt_palidx);
     printf("___________________________________________________________\n\n");
     /* save meta info to a separate file too */
     if (tofile) {
@@ -1871,9 +1872,29 @@ void printSff(Sff* sff) {
         std::cout << "\t" << format_code[pair.first] << ": " << pair.second << '\n';
     }
 
-    if (opt_verbose)
-    for (int i = 0; i < sff->header.NumberOfSprites; i++) {
-        printf("Sprite %d: Group %d, Number %d, Size %dx%d, Palette %d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->palidx);
+    if (opt_sff_info) {
+        char basename[256];
+        char outFilename[256];
+        get_basename_no_ext(sff->filename, basename, sizeof(basename));
+        snprintf(outFilename, sizeof(outFilename), "sff_info_%s.csv", basename);
+        FILE *f = fopen(outFilename, "w");
+        if (f) {
+            fprintf(f, "sep=|\n");
+            if (sff->header.Ver0 == 1) {
+                fprintf(f, "No|Group|Number|Width|Height|Off.x|Off.y|Pal.idx\n");
+            } else {
+                fprintf(f, "No|Group|Number|Width|Height|Off.x|Off.y|Pal.idx|Format|Color\n");
+            }
+            for (int i = 0; i < sff->header.NumberOfSprites; i++) {
+                if (sff->header.Ver0 == 1) {
+                    fprintf(f, "%d|%u|%u|%d|%d|%d|%d|%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx);
+                } else {
+                    fprintf(f, "%d|%u|%u|%d|%d|%d|%d|%d|%s|%d\n", i, sff->sprites[i]->Group, sff->sprites[i]->Number, sff->sprites[i]->Size[0], sff->sprites[i]->Size[1], sff->sprites[i]->Offset[0], sff->sprites[i]->Offset[1], sff->sprites[i]->palidx, format_code[-sff->sprites[i]->rle].c_str(), sff->sprites[i]->coldepth);
+                }
+            }
+            fclose(f);
+            printf("\nSprite information saved to %s\n", outFilename);
+        }
     }
 }
 
@@ -1882,13 +1903,16 @@ int main(int argc, char* argv[]) {
     Sff sff;
     int opt;
 
-    while ((opt = getopt(argc, argv, "hxvp:")) != -1) {
+    while ((opt = getopt(argc, argv, "ihxvp:")) != -1) {
         switch (opt) {
             case 'h':
-                printf("Usage: %s -x -h -v [-p palette_index]\n", argv[0]);
+                printf("Usage: %s -i -x -h -v [-p palette_index]\n", argv[0]);
                 return 0;
             case 'x':
                 opt_extract = true;
+                break;
+            case 'i':
+                opt_sff_info = true;
                 break;
             case 'v':
                 opt_verbose = true;

@@ -61,8 +61,8 @@ typedef struct {
 
 typedef struct {
     uint32_t* Pal;
-    int16_t Group;
-    int16_t Number;
+    uint16_t Group;
+    uint16_t Number;
     uint16_t Size[2];
     int16_t Offset[2];
     int palidx;

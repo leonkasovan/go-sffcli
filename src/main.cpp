@@ -1598,6 +1598,10 @@ int extractSff(Sff* sff, const char* filename) {
             opt_palidx = sff->sprites[i]->palidx;
         }
     }
+    // if SFF == v1 then update total palette
+    if (sff->header.Ver0 == 1) {
+        sff->header.NumberOfPalettes = sff->palettes.size();
+    }
     fclose(file);
     return 0;
 }
@@ -1738,19 +1742,22 @@ ok:
     /* records */
     s += sprintf(s, "X\tY\tW\tH\tx\ty\tw\th\txx\tyy\tFilename\n");
     char filename[256];
+    size_t numProcessedSprite = 0;
     for (i = 0; i < num; i++) {
-        snprintf(filename, sizeof(filename), "%d_%d.png", atlas->sff->sprites[i]->Group, atlas->sff->sprites[i]->Number);
+        snprintf(filename, sizeof(filename), "%d,%d", atlas->sff->sprites[i]->Group, atlas->sff->sprites[i]->Number);
         if (atlas->rects[i].w > 0 && atlas->rects[i].h > 0) {
             src = atlas->sff->sprites[i]->data + (atlas->sff->sprites[i]->atlas_y * atlas->sff->sprites[i]->Size[0] + atlas->sff->sprites[i]->atlas_x);
             dst = o + (atlas->width * atlas->rects[i].y + atlas->rects[i].x);
             for (j = 0; j < atlas->rects[i].h; j++, dst += atlas->width, src += atlas->sff->sprites[i]->Size[0])
                 memcpy(dst, src, atlas->rects[i].w);
-        }
-        s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%s\n",
+
+            s += sprintf(s, "%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%s\n",
             atlas->rects[i].x, atlas->rects[i].y, atlas->rects[i].w, atlas->rects[i].h,
             atlas->sff->sprites[i]->atlas_x, atlas->sff->sprites[i]->atlas_y, atlas->sff->sprites[i]->Size[0], atlas->sff->sprites[i]->Size[1],
             atlas->sff->sprites[i]->Offset[0], atlas->sff->sprites[i]->Offset[1],
             filename);
+            numProcessedSprite++;
+        }
     }
 
     char basename[256];
@@ -1770,7 +1777,7 @@ ok:
         save_as_png(outFilename, atlas->width, atlas->height, o, png_palette);
     }
     free(o);
-    printf("\nAtlas %s (%ux%u) created with palette_index=%d\n", outFilename, atlas->width, atlas->height, opt_palidx);
+    printf("\nAtlas %s (%ux%u) created with %u sprites and palette_index=%d\n", outFilename, atlas->width, atlas->height, numProcessedSprite, opt_palidx);
     printf("___________________________________________________________\n\n");
     /* save meta info to a separate file too */
     if (tofile) {

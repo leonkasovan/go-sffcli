@@ -204,6 +204,7 @@ function love.update(dt)
 							print(string.format("player.atlas_dat[%d] is nil", anim.spr_group_id))
 							players[1].state = 0
 							player.frame_no = 1
+							player.tick = 0
 						end
 					end
 
@@ -215,6 +216,7 @@ function love.update(dt)
 						print(string.format("%s atlas_dat is nil, state=%d group=%d img_no=%d", player.name, player.state, anim.spr_group_id, anim.spr_img_no))
 						players[1].state = 0
 						player.frame_no = 1
+						player.tick = 0
 					end
 				else
 					print(string.format("anim is nil, state=%d frame=%d", player.state, player.frame_no))

@@ -152,13 +152,11 @@ function loadChar(name, x, y)
 
 		::skip::
 
-		-- Get all the keys into a list
+		-- Get all the keys into a list for selecting action randomly
 		actionKeys = {}
 		for k in pairs(player.anims) do
 			table.insert(actionKeys, k)
 		end		
-		-- local randomIndex = math.random(1, #keys)
-		-- local randomKey = keys[randomIndex]
 	end
 
 	return player
@@ -170,7 +168,7 @@ function love.load()
 	love.window.setVSync(1)
 	love.window.setTitle("SFF Animations Demo")
 	love.window.setMode(windowWidth, windowHeight, {resizable=false, vsync=1})
-	table.insert(players, loadChar("sprite_atlas_Super_p13", windowWidth/2, windowHeight/2))
+	table.insert(players, loadChar("sprite_atlas_tvcalex_p2", windowWidth/2, windowHeight/2))
 	math.randomseed(os.time()) -- seed only once
 end
 
@@ -204,6 +202,8 @@ function love.update(dt)
 							dt = player.atlas_dat[anim.spr_group_id][anim.spr_img_no]
 						else
 							print(string.format("player.atlas_dat[%d] is nil", anim.spr_group_id))
+							players[1].state = 0
+							player.frame_no = 1
 						end
 					end
 
@@ -213,6 +213,8 @@ function love.update(dt)
 							player.x + dt[5] + anim.spr_x - dt[9], player.y + dt[6] + anim.spr_y - dt[10])
 					else
 						print(string.format("%s atlas_dat is nil, state=%d group=%d img_no=%d", player.name, player.state, anim.spr_group_id, anim.spr_img_no))
+						players[1].state = 0
+						player.frame_no = 1
 					end
 				else
 					print(string.format("anim is nil, state=%d frame=%d", player.state, player.frame_no))

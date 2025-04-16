@@ -1813,6 +1813,7 @@ void freeSff(Sff* sff) {
     sff->palettes.clear();
     sff->palette_usage.clear();
     sff->format_usage.clear();
+    opt_palidx = 0;
 }
 
 void printAtlas(Atlas* atlas) {

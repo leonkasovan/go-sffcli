@@ -1,7 +1,7 @@
 --[[
 Love2D lua script for loading animation from mugen file *.air (animation definition).
 It will load atlas image in PNG format with file *.tsv for atlas data.
-The image and atlas data is generated using sprpack.exe -t -f output.png input_directory/ (https://gitlab.com/bztsrc/spratlas)
+The image and atlas data is generated using sffcli.exe  (https://github.com/leonkasovan/go-sffcli)
 File atlas data has to be edited in last coloumn "Filename_GroupID_ImageNoID" => "GroupID_ImageNoID"
 
 Dhani Novan, 10:21 10 March 2025
@@ -18,6 +18,7 @@ local action_id = 0
 local loaded_atlas_img = {}
 
 default_actions = {0,5,6,10,11,12,20,21,40,41,42,43,47,100,105,120,121,122,130,131,132,140,141,142,150,151,152,5000,5001,5002,5005,5006,5007,5010,5011,5012,5015,5016,5017,5020,5021,5022,5025,5026,5027,5030,5040,5050,5070,5080,5090,5100,5160,5170,5110,5120,5200,5210,5300}
+-- default_actions = {11, 11, 11, 11, 11, 11, 11}
 
 local gw, gh = love.graphics.getDimensions()
 --~ local shader_mask = love.graphics.newCanvas()
@@ -85,7 +86,6 @@ function loadChar(name, x, y)
 
 			-- Ensure atlas_dat[group_id] is a table before assigning values
 			if player.atlas_dat[spr_group_id] == nil then
-				print("spr_group_id", spr_group_id, line)
 				player.atlas_dat[spr_group_id] = {} -- Create a new table for this key
 			end
 			player.atlas_dat[spr_group_id][spr_img_no] = { src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h,spr_off_x, spr_off_y }
@@ -156,22 +156,12 @@ function loadChar(name, x, y)
 end
 
 function love.load()
+	local windowWidth = 640
+	local windowHeight = 480
 	love.window.setVSync(1)
-
---~ 	table.insert(players, loadChar("Zangief", 0, 20))
---~ 	table.insert(players, loadChar("Zangief", 200, 20))
---~ 	table.insert(players, loadChar("Zangief", 400, 20))
---~ 	table.insert(players, loadChar("Zangief", 600, 20))
-
---~ 	table.insert(players, loadChar("kfm", 0, 200))
---~ 	table.insert(players, loadChar("kfm", 200, 200))
-	table.insert(players, loadChar("sprite_atlas_mario_p0", 400, 300))
---~ 	table.insert(players, loadChar("kfm", 600, 200))
-
-	-- table.insert(players, loadChar("Sonic", 0, 400))
-	-- table.insert(players, loadChar("Sonic", 200, 400))
-	-- table.insert(players, loadChar("Sonic", 400, 400))
-	-- table.insert(players, loadChar("Sonic", 600, 400))
+	love.window.setTitle("SFF Animations Demo")
+	love.window.setMode(windowWidth, windowHeight, {resizable=false, vsync=1})
+	table.insert(players, loadChar("sprite_atlas_Super_p13", windowWidth/2, windowHeight/2))
 end
 
 function love.update(dt)
@@ -206,7 +196,7 @@ function love.update(dt)
 					if dt ~= nil then
 						player.sprites:add(
 							love.graphics.newQuad(dt[1], dt[2], dt[3], dt[4], player.atlas_img_w, player.atlas_img_h),
-							player.x + dt[5] + anim.spr_x, player.y + dt[6] + anim.spr_y)
+							player.x + dt[5] + anim.spr_x - dt[9], player.y + dt[6] + anim.spr_y - dt[10])
 					else
 						print(string.format("%s atlas_dat is nil, state=%d group=%d img_no=%d", player.name, player.state, anim.spr_group_id, anim.spr_img_no))
 					end
@@ -219,19 +209,18 @@ function love.update(dt)
 end
 
 function love.draw()
---~ 	shader:send("time", love.timer.getTime())
---~ 	love.graphics.setShader(shader)
---~ 	love.graphics.draw(shader_mask)
---~ 	love.graphics.setShader()
+	local windowWidth, windowHeight = love.graphics.getDimensions()
+	love.graphics.line(0, windowHeight/2, windowWidth, windowHeight/2)
+	love.graphics.line(windowWidth/2, 0, windowWidth/2, windowHeight)
 
 	-- Finally, draw the sprite batch to the screen.
 	for k, player in pairs(players) do
 		love.graphics.draw(player.sprites)
-		love.graphics.print("Action: " .. tostring(player.state), player.x, player.y + 150)
+		love.graphics.print("Action: " .. tostring(player.state), player.x + 5, player.y + 5)
 	end
-	love.graphics.print("Current FPS: " .. tostring(love.timer.getFPS()), 650, 0)
+	love.graphics.print("Current FPS: " .. tostring(love.timer.getFPS()), 5, 0)
 
 	local stats = love.graphics.getStats()
-	love.graphics.print("Draw Calls: " .. stats.drawcalls, 650, 20)
-	love.graphics.print("Texture Memory: " .. tostring(math.floor(stats.texturememory / 1024 / 1024)) .. " MB", 650, 40)
+	love.graphics.print("Draw Calls: " .. stats.drawcalls, 5, 15)
+	love.graphics.print("Texture Memory: " .. tostring(math.floor(stats.texturememory / 1024 / 1024)) .. " MB", 5, 30)
 end

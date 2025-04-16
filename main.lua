@@ -16,8 +16,9 @@ local atlas_img_w, atlas_img_h
 local tick = 0
 local action_id = 0
 local loaded_atlas_img = {}
+local actionKeys = {}
 
-default_actions = {0,5,6,10,11,12,20,21,40,41,42,43,47,100,105,120,121,122,130,131,132,140,141,142,150,151,152,5000,5001,5002,5005,5006,5007,5010,5011,5012,5015,5016,5017,5020,5021,5022,5025,5026,5027,5030,5040,5050,5070,5080,5090,5100,5160,5170,5110,5120,5200,5210,5300}
+-- default_actions = {0,5,6,10,11,12,20,21,40,41,42,43,47,100,105,120,121,122,130,131,132,140,141,142,150,151,152,5000,5001,5002,5005,5006,5007,5010,5011,5012,5015,5016,5017,5020,5021,5022,5025,5026,5027,5030,5040,5050,5070,5080,5090,5100,5160,5170,5110,5120,5200,5210,5300}
 -- default_actions = {11, 11, 11, 11, 11, 11, 11}
 
 local gw, gh = love.graphics.getDimensions()
@@ -117,7 +118,7 @@ function loadChar(name, x, y)
 
 		-- parse animation element: spr_group_id, spr_img_no, spr_x, spr_y, ticks, flips, color blending
 		spr_group_id, spr_img_no, spr_x, spr_y, last_data = line:match(
-			"(%d+)%s*,%s*(%d+)%s*,%s*([%d%-]+)%s*,%s*([%d%-]+)%s*,%s*(.-)$")
+			"([%d%-]+)%s*,%s*([%d%-]+)%s*,%s*([%d%-]+)%s*,%s*([%d%-]+)%s*,%s*(.-)$")
 		if action_id ~= nil and spr_group_id ~= nil and last_data ~= nil then
 			spr_group_id = tonumber(spr_group_id)
 			spr_img_no = tonumber(spr_img_no)
@@ -136,7 +137,7 @@ function loadChar(name, x, y)
 				data = split(last_data)
 				anim.ticks = tonumber(data[1])
 				if anim.ticks == nil then
-					print("invalid", line)
+					print(string.format("invalid ticks. last_data=%s", last_data), line)
 				else
 					if anim.ticks < 0 then
 						anim.ticks = 20
@@ -150,6 +151,14 @@ function loadChar(name, x, y)
 		end
 
 		::skip::
+
+		-- Get all the keys into a list
+		actionKeys = {}
+		for k in pairs(player.anims) do
+			table.insert(actionKeys, k)
+		end		
+		-- local randomIndex = math.random(1, #keys)
+		-- local randomKey = keys[randomIndex]
 	end
 
 	return player
@@ -162,6 +171,7 @@ function love.load()
 	love.window.setTitle("SFF Animations Demo")
 	love.window.setMode(windowWidth, windowHeight, {resizable=false, vsync=1})
 	table.insert(players, loadChar("sprite_atlas_Super_p13", windowWidth/2, windowHeight/2))
+	math.randomseed(os.time()) -- seed only once
 end
 
 function love.update(dt)
@@ -181,7 +191,7 @@ function love.update(dt)
 					if player.tick > anim.ticks then
 						player.frame_no = player.frame_no + 1
 						if player.anims[player.state] ~= nil and player.frame_no > #player.anims[player.state] then
-							player.state = default_actions[math.random(1, #default_actions)]
+							player.state = actionKeys[math.random(1, #actionKeys)]
 							player.frame_no = 1
 						end
 						player.tick = 0
@@ -190,7 +200,11 @@ function love.update(dt)
 					if player.state == nil or player.frame_no == nil then
 						print("error: player.state or player.frame_no is nil", player.state, player.frame_no)
 					else
-						dt = player.atlas_dat[anim.spr_group_id][anim.spr_img_no]
+						if player.atlas_dat[anim.spr_group_id] ~= nil then
+							dt = player.atlas_dat[anim.spr_group_id][anim.spr_img_no]
+						else
+							print(string.format("player.atlas_dat[%d] is nil", anim.spr_group_id))
+						end
 					end
 
 					if dt ~= nil then

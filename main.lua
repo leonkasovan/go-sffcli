@@ -168,7 +168,7 @@ function love.load()
 	love.window.setVSync(1)
 	love.window.setTitle("SFF Animations Demo")
 	love.window.setMode(windowWidth, windowHeight, {resizable=false, vsync=1})
-	table.insert(players, loadChar("sprite_atlas_tvcalex_p2", windowWidth/2, windowHeight/2))
+	table.insert(players, loadChar("sprite_atlas_Batgirl_p3", windowWidth/2, windowHeight/2))
 	math.randomseed(os.time()) -- seed only once
 end
 
@@ -190,6 +190,7 @@ function love.update(dt)
 						player.frame_no = player.frame_no + 1
 						if player.anims[player.state] ~= nil and player.frame_no > #player.anims[player.state] then
 							player.state = actionKeys[math.random(1, #actionKeys)]
+							-- player.state = 104
 							player.frame_no = 1
 						end
 						player.tick = 0
@@ -214,12 +215,11 @@ function love.update(dt)
 							player.x + dt[5] + anim.spr_x - dt[9], player.y + dt[6] + anim.spr_y - dt[10])
 					else
 						print(string.format("%s atlas_dat is nil, state=%d group=%d img_no=%d", player.name, player.state, anim.spr_group_id, anim.spr_img_no))
-						players[1].state = 0
-						player.frame_no = 1
-						player.tick = 0
+						player.frame_no = player.frame_no + 1
 					end
 				else
 					print(string.format("anim is nil, state=%d frame=%d", player.state, player.frame_no))
+					player.frame_no = player.frame_no + 1
 				end
 			end
 		end

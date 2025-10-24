@@ -17,7 +17,6 @@ package main
 #cgo linux CFLAGS: -D__linux -D__linux__
 #cgo linux LDFLAGS: -lm -lz
 
-#include "pack.c"
 #include "libpng/png.c"
 #include "libpng/pngerror.c"
 #include "libpng/pngmem.c"
